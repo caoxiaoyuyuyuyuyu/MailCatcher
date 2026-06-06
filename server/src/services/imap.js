@@ -37,12 +37,11 @@ function getServerConfig(emailAddress) {
 }
 
 const CODE_PATTERNS = [
-  /\b(\d{6})\b/,
-  /\b(\d{4})\b/,
   /verification\s*code[:\s]*(\d{4,8})/i,
   /验证码[：:\s]*(\d{4,8})/,
   /code[:\s]*(\d{4,8})/i,
   /OTP[:\s]*(\d{4,8})/i,
+  /\b(\d{6})\b/,
 ];
 
 const TYPE_FILTERS = {
@@ -87,11 +86,68 @@ function extractCode(text) {
 
 function extractLink(text) {
   if (!text) return null;
+  const magicLink = text.match(/https?:\/\/[^\s<>"']*magic-link[^\s<>"']*/);
+  if (magicLink) return magicLink[0];
+  const verifyLink = text.match(/https?:\/\/[^\s<>"']*(?:verify|login|auth|confirm|activate)[^\s<>"']*/i);
+  if (verifyLink) return verifyLink[0];
   const linkMatch = text.match(/https?:\/\/[^\s<>"']+/);
   return linkMatch ? linkMatch[0] : null;
 }
 
+const MAILCOM_DOMAINS = new Set([
+  'mail.com', 'email.com', 'usa.com', 'consultant.com', 'europe.com',
+  'asia.com', 'iname.com', 'writeme.com', 'dr.com', 'myself.com',
+  'post.com', 'techie.com', 'engineer.com', 'cheerful.com', 'priest.com',
+  'artlover.com', 'activist.com',
+]);
+
+function isMailcomDomain(emailAddress) {
+  const domain = emailAddress.split('@')[1]?.toLowerCase();
+  return domain && (MAILCOM_DOMAINS.has(domain) || domain.endsWith('.mail.com'));
+}
+
 export async function fetchVerificationCode(emailAddress, password, type) {
+  if (isMailcomDomain(emailAddress)) {
+    return fetchViaWebApi(emailAddress, password, type);
+  }
+  return fetchViaImap(emailAddress, password, type);
+}
+
+async function fetchViaWebApi(emailAddress, password, type) {
+  const { fetchMailcomEmails } = await import('./mailcom.js');
+  const emails = await fetchMailcomEmails(emailAddress, password);
+
+  if (!emails || emails.length === 0) return null;
+
+  const typeFilter = TYPE_FILTERS[type] || TYPE_FILTERS.gpt;
+
+  for (const email of emails) {
+    const fromMatch = typeFilter.from.length === 0 ||
+      typeFilter.from.some(f => (email.from || '').toLowerCase().includes(f.toLowerCase()));
+    const subjectMatch = typeFilter.subject.test(email.subject || '');
+
+    if (!fromMatch && !subjectMatch && type !== 'all') continue;
+
+    const code = extractCode(email.body) || extractCode(email.subject);
+    const link = (email.links && email.links.length > 0)
+      ? email.links[0]
+      : extractLink(email.body);
+
+    if (code || link || type === 'all') {
+      return {
+        code: code || link || null,
+        subject: email.subject,
+        body: (email.body || '').substring(0, 2000),
+        from: email.from,
+        date: email.date,
+      };
+    }
+  }
+
+  return null;
+}
+
+async function fetchViaImap(emailAddress, password, type) {
   const serverConfig = getServerConfig(emailAddress);
   if (!serverConfig) {
     throw new Error(`无法确定 ${emailAddress} 的 IMAP 服务器`);
