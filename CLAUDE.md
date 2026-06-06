@@ -77,7 +77,26 @@ rebase 发生冲突时：
 
 **同样的问题不要犯两次！**
 
+## 架构概览
+
+- **后端**: Node.js + Express + SQLite (better-sqlite3) + imapflow
+- **前端**: Vue 3 + Element Plus (CDN 模式，单 HTML 文件)
+- **核心流程**: Token → 查找邮箱 → IMAP 连接 → 搜索最近邮件 → 提取验证码
+- **启动**: `cd server && npm start` → `http://localhost:3000`
+- **默认管理员**: admin / admin123
+
+### 关键路径
+
+- `server/src/services/imap.js` — IMAP 连接和验证码提取核心
+- `server/src/routes/message.js` — 验证码查询 API (`/api/v1/message`)
+- `server/src/routes/emails.js` — 邮箱管理 CRUD
+- `server/src/routes/mailServers.js` — IMAP 服务器配置
+- `server/src/db.js` — SQLite 数据库 schema
+- `server/public/index.html` — 完整前端 UI
+
 ## 注意事项
 
 - 在 worktree 中工作时，不要切换到其他分支
 - 完成任务后确保代码可运行、测试通过
+- Gmail/Outlook 等需要应用专用密码，不能用登录密码
+- IMAP 查询只搜索最近 10 分钟的邮件
