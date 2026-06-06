@@ -87,12 +87,26 @@ rebase 发生冲突时：
 
 ### 关键路径
 
+- `cli/mailcatcher` — CLI 工具（全局 `/usr/local/bin/mailcatcher`）
 - `server/src/services/imap.js` — IMAP 连接和验证码提取核心
+- `server/src/services/mailcom.js` — mail.com Web API 抓取
 - `server/src/routes/message.js` — 验证码查询 API (`/api/v1/message`)
 - `server/src/routes/emails.js` — 邮箱管理 CRUD
 - `server/src/routes/mailServers.js` — IMAP 服务器配置
 - `server/src/db.js` — SQLite 数据库 schema
 - `server/public/index.html` — 完整前端 UI
+
+### CLI 使用
+
+```bash
+mailcatcher code <token> [type]         # 获取验证码（无需认证）
+mailcatcher login admin admin123        # 管理员登录
+mailcatcher email list / add / delete   # 邮箱管理
+mailcatcher server list / add / delete  # 服务器配置
+mailcatcher log list / clear            # 日志管理
+```
+
+配置存储在 `~/.mailcatcher.json`，支持 `MAILCATCHER_SERVER` / `MAILCATCHER_TOKEN` 环境变量。
 
 ## 注意事项
 

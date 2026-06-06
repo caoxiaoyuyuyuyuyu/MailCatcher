@@ -1,0 +1,440 @@
+#!/usr/bin/env node
+
+const DEFAULT_SERVER = 'https://mail.claude-code-manager.com';
+const CONFIG_PATH = `${process.env.HOME}/.mailcatcher.json`;
+
+// ── Config ──────────────────────────────────────────────
+
+function loadConfig() {
+  try {
+    const fs = require('fs');
+    return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+  } catch { return {}; }
+}
+
+function saveConfig(data) {
+  const fs = require('fs');
+  const existing = loadConfig();
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify({ ...existing, ...data }, null, 2) + '\n');
+}
+
+function getServer(flags) {
+  return flags.server || process.env.MAILCATCHER_SERVER || loadConfig().server || DEFAULT_SERVER;
+}
+
+function getAdminToken(flags) {
+  return flags.token || process.env.MAILCATCHER_TOKEN || loadConfig().adminToken;
+}
+
+// ── HTTP helpers ────────────────────────────────────────
+
+async function api(server, method, path, body, adminToken) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (adminToken) headers['Authorization'] = `Bearer ${adminToken}`;
+  const opts = { method, headers };
+  if (body && method !== 'GET') opts.body = JSON.stringify(body);
+  const url = `${server.replace(/\/+$/, '')}${path}`;
+  const resp = await fetch(url, opts);
+  return resp.json();
+}
+
+// ── Output helpers ──────────────────────────────────────
+
+function die(msg, code = 1) {
+  process.stderr.write(msg + '\n');
+  process.exit(code);
+}
+
+function out(data, jsonMode) {
+  if (jsonMode) {
+    console.log(JSON.stringify(data, null, 2));
+  } else if (typeof data === 'string') {
+    console.log(data);
+  } else {
+    console.log(JSON.stringify(data, null, 2));
+  }
+}
+
+function table(rows, columns) {
+  if (!rows || rows.length === 0) { console.log('(empty)'); return; }
+  const widths = columns.map(c => c.label.length);
+  for (const row of rows) {
+    for (let i = 0; i < columns.length; i++) {
+      const val = String(row[columns[i].key] ?? '');
+      widths[i] = Math.max(widths[i], Math.min(val.length, columns[i].max || 60));
+    }
+  }
+  const header = columns.map((c, i) => c.label.padEnd(widths[i])).join('  ');
+  const sep = columns.map((_, i) => '─'.repeat(widths[i])).join('──');
+  console.log(header);
+  console.log(sep);
+  for (const row of rows) {
+    const line = columns.map((c, i) => {
+      const val = String(row[c.key] ?? '');
+      const maxW = widths[i];
+      return val.length > maxW ? val.slice(0, maxW - 1) + '…' : val.padEnd(maxW);
+    }).join('  ');
+    console.log(line);
+  }
+}
+
+// ── Commands ────────────────────────────────────────────
+
+async function cmdCode(args, flags) {
+  const token = args[0];
+  const type = args[1] || 'all';
+  if (!token) die('Usage: mailcatcher code <token> [type]\nTypes: gpt, claude, google, telegram, grok, all');
+
+  const server = getServer(flags);
+  const r = await api(server, 'GET', `/api/v1/message?token=${encodeURIComponent(token)}&type=${encodeURIComponent(type)}`);
+
+  if (flags.json) { out(r, true); return; }
+
+  if (r.code === 200 && r.message === 'success' && r.data?.code) {
+    console.log(r.data.code);
+  } else if (r.message === 'no new message') {
+    die('No new verification code found (10-minute window)', 2);
+  } else {
+    die(r.message || 'Query failed');
+  }
+}
+
+async function cmdLogin(args, flags) {
+  const username = args[0];
+  const password = args[1];
+  if (!username || !password) die('Usage: mailcatcher login <username> <password>');
+
+  const server = getServer(flags);
+  const r = await api(server, 'POST', '/api/admin/login', { username, password });
+
+  if (r.code !== 200) die(r.message || 'Login failed');
+
+  saveConfig({ adminToken: r.data.accessToken, server });
+  if (flags.json) { out(r.data, true); return; }
+  console.log(`Logged in as ${r.data.username}`);
+  console.log(`Token saved to ${CONFIG_PATH}`);
+}
+
+async function cmdConfig(args, flags) {
+  const key = args[0];
+  const value = args[1];
+  if (key === 'server' && value) {
+    saveConfig({ server: value });
+    console.log(`Server set to ${value}`);
+  } else if (key === 'server') {
+    console.log(getServer(flags));
+  } else {
+    const cfg = loadConfig();
+    console.log(`server: ${cfg.server || DEFAULT_SERVER}`);
+    console.log(`token:  ${cfg.adminToken ? cfg.adminToken.slice(0, 20) + '…' : '(not set)'}`);
+    console.log(`config: ${CONFIG_PATH}`);
+  }
+}
+
+async function cmdEmailList(args, flags) {
+  const server = getServer(flags);
+  const adminToken = getAdminToken(flags);
+  if (!adminToken) die('Not logged in. Run: mailcatcher login <user> <pass>');
+
+  const keyword = flags.search || '';
+  const page = flags.page || 1;
+  const r = await api(server, 'GET', `/api/admin/email/list?page=${page}&pageSize=50&keyword=${encodeURIComponent(keyword)}`, null, adminToken);
+  if (r.code !== 200) die(r.message || 'Failed to list emails');
+  if (flags.json) { out(r.data, true); return; }
+
+  console.log(`Total: ${r.data.total}`);
+  table(r.data.list, [
+    { key: 'id', label: 'ID', max: 5 },
+    { key: 'address', label: 'Email', max: 35 },
+    { key: 'password', label: 'Password', max: 20 },
+    { key: 'token', label: 'Token', max: 34 },
+    { key: 'status', label: 'Status', max: 8 },
+  ]);
+}
+
+async function cmdEmailAdd(args, flags) {
+  const address = args[0];
+  const password = args[1];
+  if (!address) die('Usage: mailcatcher email add <address> <password> [--appkey <key>]');
+
+  const server = getServer(flags);
+  const adminToken = getAdminToken(flags);
+  if (!adminToken) die('Not logged in. Run: mailcatcher login <user> <pass>');
+
+  const body = { address, password: password || '', appkey: flags.appkey || '', status: 1 };
+  const r = await api(server, 'POST', '/api/admin/email/create', body, adminToken);
+  if (r.code !== 200) die(r.message || 'Failed to add email');
+  if (flags.json) { out(r.data, true); return; }
+
+  console.log(`Added: ${address}`);
+  console.log(`Token: ${r.data.token}`);
+}
+
+async function cmdEmailDelete(args, flags) {
+  const id = args[0];
+  if (!id) die('Usage: mailcatcher email delete <id>');
+
+  const server = getServer(flags);
+  const adminToken = getAdminToken(flags);
+  if (!adminToken) die('Not logged in. Run: mailcatcher login <user> <pass>');
+
+  const r = await api(server, 'DELETE', `/api/admin/email/delete/${id}`, null, adminToken);
+  if (r.code !== 200) die(r.message || 'Failed to delete');
+  console.log(`Deleted email #${id}`);
+}
+
+async function cmdEmailImport(args, flags) {
+  const file = args[0];
+  if (!file) die('Usage: mailcatcher email import <file>\nFile format: one per line, email----password----appkey');
+
+  const fs = require('fs');
+  let content;
+  if (file === '-') {
+    content = fs.readFileSync(0, 'utf8');
+  } else {
+    content = fs.readFileSync(file, 'utf8');
+  }
+  const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
+  if (!lines.length) die('No emails found in input');
+
+  const server = getServer(flags);
+  const adminToken = getAdminToken(flags);
+  if (!adminToken) die('Not logged in. Run: mailcatcher login <user> <pass>');
+
+  const r = await api(server, 'POST', '/api/admin/email/import', { emails: lines }, adminToken);
+  if (r.code !== 200) die(r.message || 'Import failed');
+  if (flags.json) { out(r, true); return; }
+  console.log(r.message || `Imported ${lines.length} emails`);
+}
+
+async function cmdEmailTest(args, flags) {
+  const idOrAddress = args[0];
+  if (!idOrAddress) die('Usage: mailcatcher email test <email-address> <password>');
+
+  const server = getServer(flags);
+  const adminToken = getAdminToken(flags);
+  if (!adminToken) die('Not logged in. Run: mailcatcher login <user> <pass>');
+
+  const address = idOrAddress;
+  const password = args[1] || '';
+  const r = await api(server, 'POST', '/api/admin/email/test-connection', { address, password }, adminToken);
+  if (r.code !== 200) die(r.message || 'Connection test failed');
+  if (flags.json) { out(r.data, true); return; }
+  console.log(`OK — server: ${r.data.server}, messages: ${r.data.messages}`);
+}
+
+async function cmdServerList(args, flags) {
+  const server = getServer(flags);
+  const adminToken = getAdminToken(flags);
+  if (!adminToken) die('Not logged in. Run: mailcatcher login <user> <pass>');
+
+  const r = await api(server, 'GET', `/api/admin/mail-server/list?keyword=`, null, adminToken);
+  if (r.code !== 200) die(r.message || 'Failed');
+  if (flags.json) { out(r.data, true); return; }
+
+  table(r.data.list, [
+    { key: 'id', label: 'ID', max: 5 },
+    { key: 'domain', label: 'Domain', max: 20 },
+    { key: 'host', label: 'IMAP Host', max: 30 },
+    { key: 'port', label: 'Port', max: 6 },
+    { key: 'use_ssl', label: 'SSL', max: 4 },
+    { key: 'status', label: 'Status', max: 8 },
+  ]);
+}
+
+async function cmdServerAdd(args, flags) {
+  const domain = args[0];
+  const host = args[1];
+  if (!domain || !host) die('Usage: mailcatcher server add <domain> <host> [--port <port>] [--no-ssl]');
+
+  const server = getServer(flags);
+  const adminToken = getAdminToken(flags);
+  if (!adminToken) die('Not logged in. Run: mailcatcher login <user> <pass>');
+
+  const body = {
+    domain, host,
+    port: parseInt(flags.port) || 993,
+    use_ssl: flags['no-ssl'] ? 0 : 1,
+    status: 1,
+  };
+  const r = await api(server, 'POST', '/api/admin/mail-server/create', body, adminToken);
+  if (r.code !== 200) die(r.message || 'Failed');
+  console.log(`Added server: ${domain} → ${host}:${body.port}`);
+}
+
+async function cmdServerDelete(args, flags) {
+  const id = args[0];
+  if (!id) die('Usage: mailcatcher server delete <id>');
+
+  const server = getServer(flags);
+  const adminToken = getAdminToken(flags);
+  if (!adminToken) die('Not logged in. Run: mailcatcher login <user> <pass>');
+
+  const r = await api(server, 'DELETE', `/api/admin/mail-server/delete/${id}`, null, adminToken);
+  if (r.code !== 200) die(r.message || 'Failed');
+  console.log(`Deleted server #${id}`);
+}
+
+async function cmdLogList(args, flags) {
+  const server = getServer(flags);
+  const adminToken = getAdminToken(flags);
+  if (!adminToken) die('Not logged in. Run: mailcatcher login <user> <pass>');
+
+  const keyword = flags.search || '';
+  const page = flags.page || 1;
+  const r = await api(server, 'GET', `/api/admin/logs/email?page=${page}&pageSize=30&keyword=${encodeURIComponent(keyword)}`, null, adminToken);
+  if (r.code !== 200) die(r.message || 'Failed');
+  if (flags.json) { out(r.data, true); return; }
+
+  console.log(`Total: ${r.data.total}`);
+  table(r.data.list, [
+    { key: 'id', label: 'ID', max: 5 },
+    { key: 'email_address', label: 'Email', max: 30 },
+    { key: 'query_type', label: 'Type', max: 8 },
+    { key: 'code', label: 'Code', max: 40 },
+    { key: 'success', label: 'OK', max: 3 },
+    { key: 'created_at', label: 'Time', max: 20 },
+  ]);
+}
+
+async function cmdLogClear(args, flags) {
+  const server = getServer(flags);
+  const adminToken = getAdminToken(flags);
+  if (!adminToken) die('Not logged in. Run: mailcatcher login <user> <pass>');
+
+  const r = await api(server, 'POST', '/api/admin/logs/email/clear', {}, adminToken);
+  if (r.code !== 200) die(r.message || 'Failed');
+  console.log('Logs cleared');
+}
+
+async function cmdStats(args, flags) {
+  const server = getServer(flags);
+  const adminToken = getAdminToken(flags);
+  if (!adminToken) die('Not logged in. Run: mailcatcher login <user> <pass>');
+
+  const r = await api(server, 'GET', '/api/admin/stats', null, adminToken);
+  if (r.code !== 200) die(r.message || 'Failed');
+  if (flags.json) { out(r.data, true); return; }
+
+  console.log(`Emails:           ${r.data.emails}`);
+  console.log(`Server configs:   ${r.data.servers}`);
+  console.log(`Total queries:    ${r.data.logs}`);
+  console.log(`Successful:       ${r.data.successLogs}`);
+}
+
+// ── Arg parser ──────────────────────────────────────────
+
+function parseArgs(argv) {
+  const args = [];
+  const flags = {};
+  let i = 0;
+  while (i < argv.length) {
+    const a = argv[i];
+    if (a === '--json') { flags.json = true; }
+    else if (a === '--no-ssl') { flags['no-ssl'] = true; }
+    else if (a.startsWith('--') && i + 1 < argv.length && !argv[i + 1].startsWith('--')) {
+      flags[a.slice(2)] = argv[++i];
+    } else if (a.startsWith('--')) {
+      flags[a.slice(2)] = true;
+    } else {
+      args.push(a);
+    }
+    i++;
+  }
+  return { args, flags };
+}
+
+// ── Help ────────────────────────────────────────────────
+
+function showHelp() {
+  console.log(`mailcatcher — CLI for MailCatcher verification code platform
+
+USAGE
+  mailcatcher <command> [args] [options]
+
+CORE (no auth required)
+  code <token> [type]         Fetch verification code / magic link
+                              Types: gpt, claude, google, telegram, grok, all
+                              Prints the code to stdout on success (exit 0)
+                              Exit 2 if no new message, exit 1 on error
+
+ADMIN (requires login)
+  login <user> <pass>         Authenticate and save token
+  stats                       Show dashboard statistics
+  config [server <url>]       View/set server URL
+
+  email list [--search <kw>]  List email accounts
+  email add <addr> <pass>     Add email account (prints token)
+  email delete <id>           Delete email account
+  email import <file|->       Batch import (email----pass----appkey)
+  email test <addr> <pass>    Test IMAP/Web connection
+
+  server list                 List IMAP server configs
+  server add <domain> <host>  Add server config [--port N] [--no-ssl]
+  server delete <id>          Delete server config
+
+  log list [--search <kw>]    View query logs
+  log clear                   Clear all logs
+
+OPTIONS
+  --server <url>    Override server URL (or MAILCATCHER_SERVER env)
+  --token <token>   Override admin token (or MAILCATCHER_TOKEN env)
+  --json            Output raw JSON
+  --page <n>        Page number for list commands
+
+EXAMPLES
+  mailcatcher code abc123def claude
+  mailcatcher login admin admin123
+  mailcatcher email list
+  mailcatcher email add user@mail.com mypass
+  mailcatcher email import accounts.txt
+  echo "a@b.com----pass" | mailcatcher email import -`);
+}
+
+// ── Router ──────────────────────────────────────────────
+
+async function main() {
+  const { args, flags } = parseArgs(process.argv.slice(2));
+  const cmd = args[0];
+  const sub = args[1];
+  const rest = args.slice(2);
+
+  if (!cmd || cmd === 'help' || flags.help) { showHelp(); return; }
+
+  const routes = {
+    'code':           () => cmdCode(args.slice(1), flags),
+    'login':          () => cmdLogin(args.slice(1), flags),
+    'config':         () => cmdConfig(args.slice(1), flags),
+    'stats':          () => cmdStats([], flags),
+    'email.list':     () => cmdEmailList(rest, flags),
+    'email.add':      () => cmdEmailAdd(rest, flags),
+    'email.delete':   () => cmdEmailDelete(rest, flags),
+    'email.import':   () => cmdEmailImport(rest, flags),
+    'email.test':     () => cmdEmailTest(rest, flags),
+    'server.list':    () => cmdServerList(rest, flags),
+    'server.add':     () => cmdServerAdd(rest, flags),
+    'server.delete':  () => cmdServerDelete(rest, flags),
+    'log.list':       () => cmdLogList(rest, flags),
+    'log.clear':      () => cmdLogClear(rest, flags),
+  };
+
+  const compoundKey = sub ? `${cmd}.${sub}` : null;
+  const handler = (compoundKey && routes[compoundKey]) || routes[cmd];
+  if (!handler) {
+    if (cmd === 'email' || cmd === 'server' || cmd === 'log') {
+      die(`Unknown subcommand: ${cmd} ${sub || ''}\nRun: mailcatcher help`);
+    }
+    die(`Unknown command: ${cmd}\nRun: mailcatcher help`);
+  }
+
+  try {
+    await handler();
+  } catch (err) {
+    if (err.cause?.code === 'ECONNREFUSED') {
+      die(`Cannot connect to ${getServer(flags)} — is the server running?`);
+    }
+    die(err.message);
+  }
+}
+
+main();

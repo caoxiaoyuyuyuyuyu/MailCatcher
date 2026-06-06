@@ -63,11 +63,11 @@
       <div class="page-title">在线接码工具</div>
       <el-form label-position="top">
         <el-form-item label="查询令牌">
-          <el-input v-model="codeForm.token" placeholder="请输入查询令牌" size="large" clearable />
+          <el-input v-model="codeForm.token" placeholder="请输入查询令牌" size="large" clearable></el-input>
         </el-form-item>
         <el-form-item label="项目选择">
           <el-select v-model="codeForm.type" size="large" style="width:100%">
-            <el-option v-for="t in codeTypes" :key="t.value" :label="t.label" :value="t.value" />
+            <el-option v-for="t in codeTypes" :key="t.value" :label="t.label" :value="t.value"></el-option>
           </el-select>
         </el-form-item>
         <p style="font-size:13px;color:#909399;margin-bottom:16px">仅获取10分钟内收到的验证码，超出则无效</p>
@@ -90,10 +90,10 @@
         <div class="login-title">管理员登录</div>
         <el-form @submit.prevent="doLogin">
           <el-form-item>
-            <el-input v-model="loginForm.username" placeholder="用户名" size="large" prefix-icon="User" />
+            <el-input v-model="loginForm.username" placeholder="用户名" size="large" prefix-icon="User"></el-input>
           </el-form-item>
           <el-form-item>
-            <el-input v-model="loginForm.password" type="password" placeholder="密码" size="large" prefix-icon="Lock" show-password />
+            <el-input v-model="loginForm.password" type="password" placeholder="密码" size="large" prefix-icon="Lock" show-password></el-input>
           </el-form-item>
           <el-button type="primary" size="large" style="width:100%" :loading="loginLoading" native-type="submit">
             登 录
@@ -128,17 +128,17 @@
     <div v-if="page==='emails' && isLoggedIn" class="page-card">
       <div class="page-title">邮箱管理</div>
       <div class="toolbar">
-        <el-input v-model="emailSearch" placeholder="搜索邮箱/令牌" size="default" style="width:250px" clearable @clear="loadEmails" @keyup.enter="loadEmails" />
+        <el-input v-model="emailSearch" placeholder="搜索邮箱/令牌" size="default" style="width:250px" clearable @clear="loadEmails" @keyup.enter="loadEmails"></el-input>
         <el-button type="primary" @click="loadEmails">搜索</el-button>
         <el-button type="success" @click="showAddEmail">添加邮箱</el-button>
         <el-button type="warning" @click="showImportEmails">批量导入</el-button>
         <el-button type="danger" @click="deleteSelectedEmails" :disabled="!selectedEmails.length">批量删除</el-button>
       </div>
       <el-table :data="emailList" border stripe @selection-change="v => selectedEmails = v" max-height="500">
-        <el-table-column type="selection" width="45" />
-        <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="address" label="邮箱地址" min-width="200" show-overflow-tooltip />
-        <el-table-column prop="password" label="密码" width="150" show-overflow-tooltip />
+        <el-table-column type="selection" width="45"></el-table-column>
+        <el-table-column prop="id" label="ID" width="60"></el-table-column>
+        <el-table-column prop="address" label="邮箱地址" min-width="200" show-overflow-tooltip></el-table-column>
+        <el-table-column prop="password" label="密码" width="150" show-overflow-tooltip></el-table-column>
         <el-table-column prop="token" label="查询令牌" min-width="280" show-overflow-tooltip>
           <template #default="{row}">
             <div style="display:flex;align-items:center;gap:4px">
@@ -172,15 +172,15 @@
     <div v-if="page==='servers' && isLoggedIn" class="page-card">
       <div class="page-title">邮件服务配置</div>
       <div class="toolbar">
-        <el-input v-model="serverSearch" placeholder="搜索域名/地址" size="default" style="width:250px" clearable @clear="loadServers" @keyup.enter="loadServers" />
+        <el-input v-model="serverSearch" placeholder="搜索域名/地址" size="default" style="width:250px" clearable @clear="loadServers" @keyup.enter="loadServers"></el-input>
         <el-button type="primary" @click="loadServers">搜索</el-button>
         <el-button type="success" @click="showAddServer">添加服务</el-button>
       </div>
       <el-table :data="serverList" border stripe max-height="500">
-        <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="domain" label="邮箱域名" min-width="150" />
-        <el-table-column prop="host" label="IMAP 服务器" min-width="200" />
-        <el-table-column prop="port" label="端口" width="80" align="center" />
+        <el-table-column prop="id" label="ID" width="60"></el-table-column>
+        <el-table-column prop="domain" label="邮箱域名" min-width="150"></el-table-column>
+        <el-table-column prop="host" label="IMAP 服务器" min-width="200"></el-table-column>
+        <el-table-column prop="port" label="端口" width="80" align="center"></el-table-column>
         <el-table-column prop="use_ssl" label="SSL" width="70" align="center">
           <template #default="{row}"><el-tag :type="row.use_ssl?'success':'info'" size="small">{{ row.use_ssl?'是':'否' }}</el-tag></template>
         </el-table-column>
@@ -202,23 +202,23 @@
     <div v-if="page==='logs' && isLoggedIn" class="page-card">
       <div class="page-title">查询日志</div>
       <div class="toolbar">
-        <el-input v-model="logSearch" placeholder="搜索" size="default" style="width:250px" clearable @clear="loadLogs" @keyup.enter="loadLogs" />
+        <el-input v-model="logSearch" placeholder="搜索" size="default" style="width:250px" clearable @clear="loadLogs" @keyup.enter="loadLogs"></el-input>
         <el-button type="primary" @click="loadLogs">搜索</el-button>
         <el-popconfirm title="清空所有日志？" @confirm="clearLogs">
           <template #reference><el-button type="danger">清空日志</el-button></template>
         </el-popconfirm>
       </div>
       <el-table :data="logList" border stripe max-height="500">
-        <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="email_address" label="邮箱" min-width="200" show-overflow-tooltip />
-        <el-table-column prop="query_type" label="类型" width="100" />
-        <el-table-column prop="code" label="验证码" width="120" />
-        <el-table-column prop="subject" label="邮件主题" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="id" label="ID" width="60"></el-table-column>
+        <el-table-column prop="email_address" label="邮箱" min-width="200" show-overflow-tooltip></el-table-column>
+        <el-table-column prop="query_type" label="类型" width="100"></el-table-column>
+        <el-table-column prop="code" label="验证码" width="150" show-overflow-tooltip></el-table-column>
+        <el-table-column prop="subject" label="邮件主题" min-width="200" show-overflow-tooltip></el-table-column>
         <el-table-column prop="success" label="结果" width="80" align="center">
           <template #default="{row}"><el-tag :type="row.success?'success':'danger'" size="small">{{ row.success?'成功':'失败' }}</el-tag></template>
         </el-table-column>
-        <el-table-column prop="error_msg" label="错误信息" min-width="200" show-overflow-tooltip />
-        <el-table-column prop="created_at" label="时间" width="160" />
+        <el-table-column prop="error_msg" label="错误信息" min-width="200" show-overflow-tooltip></el-table-column>
+        <el-table-column prop="created_at" label="时间" width="160"></el-table-column>
       </el-table>
       <div style="margin-top:16px;display:flex;justify-content:flex-end">
         <el-pagination background layout="total, prev, pager, next" :total="logTotal"
@@ -231,19 +231,19 @@
   <el-dialog v-model="emailDialog" :title="emailForm.id ? '编辑邮箱' : '添加邮箱'" width="500px">
     <el-form label-width="80px">
       <el-form-item label="邮箱地址" required>
-        <el-input v-model="emailForm.address" placeholder="user@example.com" />
+        <el-input v-model="emailForm.address" placeholder="user@example.com"></el-input>
       </el-form-item>
       <el-form-item label="密码">
-        <el-input v-model="emailForm.password" placeholder="邮箱密码" show-password />
+        <el-input v-model="emailForm.password" placeholder="邮箱密码" show-password></el-input>
       </el-form-item>
       <el-form-item label="应用密钥">
-        <el-input v-model="emailForm.appkey" placeholder="可选" />
+        <el-input v-model="emailForm.appkey" placeholder="可选"></el-input>
       </el-form-item>
       <el-form-item label="查询令牌">
-        <el-input v-model="emailForm.token" placeholder="留空自动生成" />
+        <el-input v-model="emailForm.token" placeholder="留空自动生成"></el-input>
       </el-form-item>
       <el-form-item label="状态">
-        <el-switch v-model="emailForm.status" :active-value="1" :inactive-value="0" />
+        <el-switch v-model="emailForm.status" :active-value="1" :inactive-value="0"></el-switch>
       </el-form-item>
     </el-form>
     <template #footer>
@@ -267,19 +267,19 @@
   <el-dialog v-model="serverDialog" :title="serverForm.id ? '编辑服务' : '添加服务'" width="500px">
     <el-form label-width="100px">
       <el-form-item label="邮箱域名" required>
-        <el-input v-model="serverForm.domain" placeholder="例: gmail.com" />
+        <el-input v-model="serverForm.domain" placeholder="例: gmail.com"></el-input>
       </el-form-item>
       <el-form-item label="IMAP 地址" required>
-        <el-input v-model="serverForm.host" placeholder="例: imap.gmail.com" />
+        <el-input v-model="serverForm.host" placeholder="例: imap.gmail.com"></el-input>
       </el-form-item>
       <el-form-item label="端口">
-        <el-input-number v-model="serverForm.port" :min="1" :max="65535" />
+        <el-input-number v-model="serverForm.port" :min="1" :max="65535"></el-input-number>
       </el-form-item>
       <el-form-item label="SSL">
-        <el-switch v-model="serverForm.use_ssl" :active-value="1" :inactive-value="0" />
+        <el-switch v-model="serverForm.use_ssl" :active-value="1" :inactive-value="0"></el-switch>
       </el-form-item>
       <el-form-item label="状态">
-        <el-switch v-model="serverForm.status" :active-value="1" :inactive-value="0" />
+        <el-switch v-model="serverForm.status" :active-value="1" :inactive-value="0"></el-switch>
       </el-form-item>
     </el-form>
     <template #footer>

@@ -25,6 +25,68 @@ npm start
 - 用户名: `admin`
 - 密码: `admin123`
 
+## CLI 命令行工具
+
+全局可用的命令行工具，适合 Agent 自动化或终端操作。
+
+### 安装
+
+CLI 已安装到 `/usr/local/bin/mailcatcher`，全局可用。
+
+### 核心命令（无需认证）
+
+```bash
+# 获取验证码 — 直接输出 code 到 stdout，适合脚本和 Agent 使用
+mailcatcher code <token> [type]
+
+# 示例
+mailcatcher code 864305e9eb314d05bed1793ebc386a88 claude
+# → https://claude.ai/magic-link#1e87fa39...
+
+# JSON 模式（含完整信息）
+mailcatcher code <token> claude --json
+```
+
+### 管理命令（需要先 login）
+
+```bash
+# 登录（token 自动保存到 ~/.mailcatcher.json）
+mailcatcher login admin admin123
+
+# 查看统计
+mailcatcher stats
+
+# 邮箱管理
+mailcatcher email list
+mailcatcher email add user@mail.com password123
+mailcatcher email delete 1
+mailcatcher email import accounts.txt       # 文件：email----pass----appkey
+echo "a@b.com----pass" | mailcatcher email import -  # stdin
+
+# 服务器配置
+mailcatcher server list
+mailcatcher server add example.com imap.example.com --port 993
+
+# 查询日志
+mailcatcher log list
+mailcatcher log clear
+```
+
+### 配置
+
+```bash
+mailcatcher config                          # 查看当前配置
+mailcatcher config server http://localhost:3100  # 设置服务器地址
+```
+
+也可通过环境变量覆盖：`MAILCATCHER_SERVER`、`MAILCATCHER_TOKEN`
+
+### 退出码
+
+- `0` — 成功
+- `1` — 错误（认证失败、参数错误等）
+- `2` — 无新验证码（10 分钟内无新邮件）
+
 ## 使用流程
 
 ### 1. 配置邮件服务器（可选）
@@ -101,6 +163,8 @@ GET /api/v1/message?token=YOUR_TOKEN&type=gpt
 ## 项目结构
 
 ```
+cli/
+└── mailcatcher              # CLI 工具（全局 /usr/local/bin/mailcatcher）
 server/
 ├── package.json
 ├── data/                    # SQLite 数据库（自动创建）
@@ -118,7 +182,8 @@ server/
     │   ├── message.js       # 验证码查询（核心）
     │   └── logs.js          # 日志管理
     └── services/
-        └── imap.js          # IMAP 连接与验证码提取
+        ├── imap.js          # IMAP 连接与验证码提取
+        └── mailcom.js       # mail.com Web API 抓取
 ```
 
 ## 注意事项
