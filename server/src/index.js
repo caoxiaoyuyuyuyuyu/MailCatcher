@@ -8,6 +8,7 @@ import emailRoutes from './routes/emails.js';
 import mailServerRoutes from './routes/mailServers.js';
 import messageRoutes from './routes/message.js';
 import logRoutes from './routes/logs.js';
+import claudeRoutes from './routes/claude.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -20,6 +21,7 @@ app.use('/api/admin', authRoutes);
 app.use('/api/admin/email', emailRoutes);
 app.use('/api/admin/mail-server', mailServerRoutes);
 app.use('/api/v1/message', messageRoutes);
+app.use('/api/v1/claude', claudeRoutes);
 app.use('/api/admin/logs', logRoutes);
 
 app.use(express.static(join(__dirname, '..', 'public')));
