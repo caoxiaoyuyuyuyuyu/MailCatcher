@@ -4,8 +4,9 @@
 
 ## Git 信息
 
-- Remote: 无（纯本地项目）
+- Remote: `origin` → github.com/caoxiaoyuyuyuyuyu/MailCatcher.git
 - 默认分支: main
+- 有 remote，按任务生命周期「有 remote」分支执行（merge/push 前需经用户 review）
 
 ## 任务生命周期
 
@@ -79,21 +80,36 @@ rebase 发生冲突时：
 
 ## 架构概览
 
-- **后端**: Node.js + Express + SQLite (better-sqlite3) + imapflow
+MailCatcher 已从「纯接码工具」演进为「**多租户账号管理 + 统一接码网关**」。
+
+- **后端**: Node.js + Express + SQLite (better-sqlite3) + imapflow + playwright-core
 - **前端**: Vue 3 + Element Plus (CDN 模式，单 HTML 文件)
-- **核心流程**: Token → 查找邮箱 → IMAP 连接 → 搜索最近邮件 → 提取验证码
+- **多租户**: teams + users(三级角色 super_admin/team_admin/member)，账号/日志按 team 隔离
+- **账号来源(source)**:
+  - `self` — 自管邮箱，本地 IMAP/mailcom 取码（密码 AES-GCM 加密存）
+  - `forward` — 171mail 账号，转发到 `b.171mail.com/api/v1/message`（上游 token 加密存）
+- **统一接码**: `GET /api/v1/message?token=&type=` 按 source 分发；对外只认我方签发 token(存 hash)
+- **状态系统**: 健康轴 `health_status`(active/error/banned/expired/disabled) + 占用轴 `assignee_id`，
+  变更记 `account_status_logs`；连续取码失败自动标 error
+- **核心流程**: 我方 token → token_hash 查账号 → 按 source 走本地/转发 → 提取验证码
 - **启动**: `cd server && npm start` → `http://localhost:3000`
-- **默认管理员**: admin / admin123
+- **测试**: `cd server && npm test`
+- **默认管理员**: admin / admin123（super_admin）
 
 ### 关键路径
 
 - `cli/mailcatcher` — CLI 工具（全局 `/usr/local/bin/mailcatcher`）
-- `server/src/services/imap.js` — IMAP 连接和验证码提取核心
-- `server/src/services/mailcom.js` — mail.com Web API 抓取
-- `server/src/routes/message.js` — 验证码查询 API (`/api/v1/message`)
-- `server/src/routes/emails.js` — 邮箱管理 CRUD
+- `server/src/services/imap.js` — IMAP 连接和验证码提取核心（self 账号）
+- `server/src/services/mailcom.js` — mail.com Web API 抓取（self 账号）
+- `server/src/services/forward171.js` — 171mail 转发适配器（forward 账号）
+- `server/src/services/crypto.js` — AES-256-GCM 加解密 + token hash（方案乙）
+- `server/src/middleware/auth.js` — JWT + requireRole + teamScope 团队隔离
+- `server/src/routes/message.js` — 接码 API (`/api/v1/message`)，按 source 分发本地/转发
+- `server/src/routes/emails.js` — 账号 CRUD（source/状态机/领用/token 轮换/团队隔离）
+- `server/src/routes/teams.js` / `users.js` — 团队与用户管理（RBAC）
 - `server/src/routes/mailServers.js` — IMAP 服务器配置
-- `server/src/db.js` — SQLite 数据库 schema
+- `server/src/db.js` — SQLite schema（多租户 + 账号来源 + 状态系统）
+- `server/test/run-tests.mjs` — 集成测试（内置 mock171），`npm test`
 - `server/public/index.html` — 完整前端 UI
 
 ### CLI 使用
@@ -111,6 +127,11 @@ mailcatcher log list / clear            # 日志管理
 ## 注意事项
 
 - 在 worktree 中工作时，不要切换到其他分支
-- 完成任务后确保代码可运行、测试通过
+- 完成任务后确保代码可运行、测试通过（`cd server && npm test`）
 - Gmail/Outlook 等需要应用专用密码，不能用登录密码
 - IMAP 查询只搜索最近 10 分钟的邮件
+- **环境变量**：生产必须设置 `ENCRYPTION_KEY`（加密 IMAP 密码/171mail token）与 `JWT_SECRET`；缺省会告警
+- **账号来源**：`source=self` 走本地 IMAP/mailcom；`source=forward` 转发到 171mail（密文存上游 token）
+- **方案乙**：所有账号对外都用我方签发的 token（库内存 hash，创建/轮换时明文仅显示一次）
+- **默认管理员**：admin / admin123，角色为 `super_admin`（跨团队）
+- **可配置**：`MAILCATCHER_DATA_DIR`（DB 目录）、`FORWARD_171_BASE`（171mail 地址，测试用）
