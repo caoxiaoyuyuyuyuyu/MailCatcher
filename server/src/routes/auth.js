@@ -2,6 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import db from '../db.js';
 import { generateToken, authMiddleware } from '../middleware/auth.js';
+import { generateApiToken, hashToken } from '../services/crypto.js';
 
 const router = Router();
 
@@ -36,6 +37,7 @@ router.post('/login', (req, res) => {
     code: 200,
     data: {
       accessToken: token,
+      id: user.id,
       username: user.username,
       role: user.role,
       team_id: user.team_id ?? null,
@@ -46,10 +48,18 @@ router.post('/login', (req, res) => {
 });
 
 router.get('/me', authMiddleware, (req, res) => {
-  const user = db.prepare('SELECT id, username, role, team_id, status FROM users WHERE id = ?').get(req.user.id);
+  const user = db.prepare('SELECT id, username, role, team_id, status, api_key_hash FROM users WHERE id = ?').get(req.user.id);
   if (!user) return res.json({ code: 401, message: '用户不存在' });
   const team = user.team_id ? db.prepare('SELECT name FROM teams WHERE id = ?').get(user.team_id) : null;
-  res.json({ code: 200, data: { ...user, team_name: team?.name ?? null }, message: 'success' });
+  const { api_key_hash, ...safe } = user;
+  res.json({ code: 200, data: { ...safe, team_name: team?.name ?? null, has_api_key: !!api_key_hash }, message: 'success' });
+});
+
+// 自助生成/重置个人 API Key（用于 CLI/Agent 按邮箱取码）；明文仅此一次返回
+router.post('/api-key', authMiddleware, (req, res) => {
+  const key = generateApiToken();
+  db.prepare('UPDATE users SET api_key_hash = ? WHERE id = ?').run(hashToken(key), req.user.id);
+  res.json({ code: 200, data: { apiKey: key }, message: 'success' });
 });
 
 router.post('/change-password', authMiddleware, (req, res) => {

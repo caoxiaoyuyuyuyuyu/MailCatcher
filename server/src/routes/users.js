@@ -23,7 +23,7 @@ router.get('/list', (req, res) => {
   const params = [];
   if (!isSuper(req)) { where += ' AND team_id = ?'; params.push(req.user.team_id ?? -1); }
   if (keyword) { where += ' AND username LIKE ?'; params.push(`%${keyword}%`); }
-  const rows = db.prepare(`SELECT ${publicCols} FROM users WHERE ${where} ORDER BY id`).all(...params);
+  const rows = db.prepare(`SELECT ${publicCols}, (api_key_hash IS NOT NULL) AS has_api_key FROM users WHERE ${where} ORDER BY id`).all(...params);
   const teams = Object.fromEntries(db.prepare('SELECT id, name FROM teams').all().map(t => [t.id, t.name]));
   const list = rows.map(u => ({ ...u, team_name: u.team_id ? teams[u.team_id] || null : null }));
   res.json({ code: 200, data: { list, total: list.length } });

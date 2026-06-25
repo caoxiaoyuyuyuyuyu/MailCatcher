@@ -90,6 +90,16 @@ try {
   const gptFetch = await api('GET', `/api/v1/message?token=${QTOKEN}&type=gpt`);
   ok(gptFetch.message === 'no new message', '空邮件归一为 no new message');
 
+  console.log('## 邮箱接码 + 用户 API Key');
+  const byEmailJwt = await api('GET', '/api/v1/message?email=fwd@priest.com&type=claude', null, ALICE);
+  ok(byEmailJwt.code === 200 && (byEmailJwt.data?.code || '').includes('magic-link'), 'alice 用登录态按邮箱取码');
+  const keyResp = await api('POST', '/api/admin/api-key', {}, ALICE);
+  ok(keyResp.data?.apiKey, 'alice 生成个人 API Key');
+  const byEmailKey = await api('GET', '/api/v1/message?email=fwd@priest.com&type=claude', null, keyResp.data.apiKey);
+  ok(byEmailKey.code === 200 && (byEmailKey.data?.code || '').includes('magic-link'), 'alice 用 API Key 按邮箱取码');
+  ok((await api('GET', '/api/v1/message?email=fwd@priest.com&type=claude')).code === 401, '按邮箱无身份被拒(401)');
+  ok((await api('GET', '/api/v1/message?email=nobody@nowhere.com&type=claude', null, ALICE)).code === 404, '不存在的邮箱返回 404');
+
   console.log('## self 账号取码(本地)');
   const selfAcc = await api('POST', '/api/admin/email/create', { address: 'self@example.com', source: 'self', password: 'p' }, ALICE);
   const selfFetch = await api('GET', `/api/v1/message?token=${selfAcc.data.token}&type=claude`);
@@ -116,6 +126,7 @@ try {
   ok(aliceTeams.data.list.length === 1 && aliceTeams.data.list[0].id === TA, 'alice 只看到自己团队');
   await api('POST', '/api/admin/email/create', { address: 'other@priest.com', source: 'forward', forward_token: 'x', team_id: TB }, ADMIN);
   ok((await api('GET', '/api/admin/email/list', null, ALICE)).data.list.every(a => a.team_id === TA), 'alice 看不到 TeamB 账号');
+  ok((await api('GET', '/api/v1/message?email=other@priest.com&type=claude', null, ALICE)).code === 403, 'alice 跨团队按邮箱取码被拒(403)');
 
   console.log('## 角色门禁');
   ok((await api('POST', '/api/admin/user/create', { username: 'x', password: 'p', role: 'member', team_id: TA }, BOB)).code === 403, 'member 无用户管理权(403)');
