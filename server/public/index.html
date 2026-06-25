@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MailCatcher - 邮件接码平台</title>
+  <title>MailCatcher - 账号管理 & 接码平台</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/element-plus@2.8.8/dist/index.css">
   <script src="https://cdn.jsdelivr.net/npm/vue@3.5.13/dist/vue.global.prod.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/element-plus@2.8.8/dist/index.full.min.js"></script>
@@ -13,27 +13,29 @@
     #app { min-height: 100vh; }
     .app-header { background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.08); padding: 0 24px; display: flex; align-items: center; height: 56px; position: sticky; top: 0; z-index: 100; }
     .app-header .logo { font-size: 18px; font-weight: 600; color: #409eff; }
-    .app-header .nav { margin-left: 40px; display: flex; gap: 8px; }
-    .app-header .nav-item { padding: 6px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; color: #606266; transition: all .2s; }
+    .app-header .nav { margin-left: 40px; display: flex; gap: 6px; flex-wrap: wrap; }
+    .app-header .nav-item { padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 14px; color: #606266; transition: all .2s; }
     .app-header .nav-item:hover { background: #ecf5ff; color: #409eff; }
     .app-header .nav-item.active { background: #409eff; color: #fff; }
     .app-header .spacer { flex: 1; }
-    .app-content { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    .app-content { max-width: 1280px; margin: 0 auto; padding: 24px; }
     .page-card { background: #fff; border-radius: 8px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
     .page-title { font-size: 20px; font-weight: 600; margin-bottom: 20px; color: #303133; }
     .toolbar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
-    .stat-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .stat-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
     .stat-card { background: #fff; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
     .stat-card .label { font-size: 13px; color: #909399; margin-bottom: 8px; }
     .stat-card .value { font-size: 28px; font-weight: 600; color: #303133; }
-    .code-result { margin-top: 16px; padding: 16px; border-radius: 8px; font-size: 24px; font-weight: 600; text-align: center; }
+    .code-result { margin-top: 16px; padding: 16px; border-radius: 8px; font-size: 18px; font-weight: 600; text-align: center; word-break: break-all; }
     .code-result.success { background: #f0f9eb; color: #67c23a; border: 1px solid #e1f3d8; }
     .code-result.error { background: #fef0f0; color: #f56c6c; border: 1px solid #fde2e2; }
     .code-result.info { background: #f4f4f5; color: #909399; border: 1px solid #e9e9eb; }
     .login-wrapper { display: flex; justify-content: center; align-items: center; min-height: calc(100vh - 56px); }
     .login-card { width: 400px; padding: 40px; }
     .login-title { text-align: center; font-size: 24px; font-weight: 600; margin-bottom: 30px; color: #303133; }
-    .import-textarea { font-family: 'Courier New', monospace; }
+    .import-textarea textarea { font-family: 'Courier New', monospace; }
+    .secret-box { background:#f4f4f5; border:1px dashed #c0c4cc; border-radius:6px; padding:12px; font-family:'Courier New',monospace; word-break:break-all; margin:8px 0; }
+    .hint { font-size: 13px; color: #909399; }
   </style>
 </head>
 <body>
@@ -41,43 +43,57 @@
   <div class="app-header">
     <span class="logo">MailCatcher</span>
     <div class="nav">
-      <div class="nav-item" :class="{active: page==='code'}" @click="page='code'">在线接码</div>
+      <div class="nav-item" :class="{active: page==='code'}" @click="go('code')">在线接码</div>
       <template v-if="isLoggedIn">
-        <div class="nav-item" :class="{active: page==='dashboard'}" @click="page='dashboard'">控制台</div>
-        <div class="nav-item" :class="{active: page==='emails'}" @click="page='emails'">邮箱管理</div>
-        <div class="nav-item" :class="{active: page==='servers'}" @click="page='servers'">服务配置</div>
-        <div class="nav-item" :class="{active: page==='logs'}" @click="page='logs'">查询日志</div>
+        <div class="nav-item" :class="{active: page==='dashboard'}" @click="go('dashboard')">控制台</div>
+        <div class="nav-item" :class="{active: page==='accounts'}" @click="go('accounts')">账号管理</div>
+        <div v-if="isSuper" class="nav-item" :class="{active: page==='teams'}" @click="go('teams')">团队管理</div>
+        <div v-if="canManageUsers" class="nav-item" :class="{active: page==='users'}" @click="go('users')">用户管理</div>
+        <div class="nav-item" :class="{active: page==='servers'}" @click="go('servers')">服务配置</div>
+        <div class="nav-item" :class="{active: page==='logs'}" @click="go('logs')">查询日志</div>
+        <div class="nav-item" :class="{active: page==='profile'}" @click="go('profile')">个人</div>
       </template>
     </div>
     <div class="spacer"></div>
     <template v-if="isLoggedIn">
-      <span style="margin-right:12px;font-size:14px;color:#606266">{{ adminUser }}</span>
+      <span style="margin-right:12px;font-size:14px;color:#606266">{{ me.username }}
+        <el-tag size="small" :type="roleTag(me.role).type" style="margin-left:4px">{{ roleTag(me.role).label }}</el-tag>
+        <span v-if="me.team_name" style="margin-left:4px;color:#909399">@{{ me.team_name }}</span>
+      </span>
       <el-button size="small" @click="logout">退出</el-button>
     </template>
-    <el-button v-else size="small" type="primary" @click="page='login'">管理登录</el-button>
+    <el-button v-else size="small" type="primary" @click="go('login')">管理登录</el-button>
   </div>
 
   <div class="app-content">
     <!-- 在线接码 -->
-    <div v-if="page==='code'" class="page-card">
-      <div class="page-title">在线接码工具</div>
+    <div v-if="page==='code'" class="page-card" style="max-width:640px;margin:0 auto">
+      <div class="page-title">在线接码</div>
+      <el-radio-group v-model="codeForm.mode" style="margin-bottom:16px">
+        <el-radio-button value="email" :disabled="!isLoggedIn">按邮箱（需登录）</el-radio-button>
+        <el-radio-button value="token">按令牌</el-radio-button>
+      </el-radio-group>
       <el-form label-position="top">
-        <el-form-item label="查询令牌">
-          <el-input v-model="codeForm.token" placeholder="请输入查询令牌" size="large" clearable></el-input>
+        <el-form-item v-if="codeForm.mode==='email'" label="邮箱账号">
+          <el-select v-model="codeForm.email" filterable allow-create default-first-option
+            placeholder="选择或输入本团队账号邮箱" size="large" style="width:100%" @focus="ensureAccountsLoaded">
+            <el-option v-for="a in accountList" :key="a.id" :label="a.address" :value="a.address"></el-option>
+          </el-select>
         </el-form-item>
-        <el-form-item label="项目选择">
+        <el-form-item v-else label="查询令牌">
+          <el-input v-model="codeForm.token" placeholder="请输入账号查询令牌" size="large" clearable></el-input>
+        </el-form-item>
+        <el-form-item label="项目类型">
           <el-select v-model="codeForm.type" size="large" style="width:100%">
             <el-option v-for="t in codeTypes" :key="t.value" :label="t.label" :value="t.value"></el-option>
           </el-select>
         </el-form-item>
-        <p style="font-size:13px;color:#909399;margin-bottom:16px">仅获取10分钟内收到的验证码，超出则无效</p>
-        <el-button type="primary" size="large" style="width:100%" :loading="codeLoading" @click="fetchCode">
-          获取验证码
-        </el-button>
+        <p class="hint" style="margin-bottom:16px">仅获取 10 分钟内收到的验证码，超出则无效</p>
+        <el-button type="primary" size="large" style="width:100%" :loading="codeLoading" @click="fetchCode">获取验证码</el-button>
         <div v-if="codeResult" :class="['code-result', codeResultType]">
           <div v-if="codeResultType==='success'" style="display:flex;align-items:center;justify-content:center;gap:12px">
             <span>{{ codeResult }}</span>
-            <el-button size="small" @click="copyCode">复制</el-button>
+            <el-button size="small" @click="copyText(codeResult)">复制</el-button>
           </div>
           <div v-else>{{ codeResult }}</div>
         </div>
@@ -87,17 +103,11 @@
     <!-- 登录 -->
     <div v-if="page==='login'" class="login-wrapper">
       <el-card class="login-card">
-        <div class="login-title">管理员登录</div>
+        <div class="login-title">登录</div>
         <el-form @submit.prevent="doLogin">
-          <el-form-item>
-            <el-input v-model="loginForm.username" placeholder="用户名" size="large" prefix-icon="User"></el-input>
-          </el-form-item>
-          <el-form-item>
-            <el-input v-model="loginForm.password" type="password" placeholder="密码" size="large" prefix-icon="Lock" show-password></el-input>
-          </el-form-item>
-          <el-button type="primary" size="large" style="width:100%" :loading="loginLoading" native-type="submit">
-            登 录
-          </el-button>
+          <el-form-item><el-input v-model="loginForm.username" placeholder="用户名" size="large"></el-input></el-form-item>
+          <el-form-item><el-input v-model="loginForm.password" type="password" placeholder="密码" size="large" show-password></el-input></el-form-item>
+          <el-button type="primary" size="large" style="width:100%" :loading="loginLoading" native-type="submit">登 录</el-button>
         </el-form>
       </el-card>
     </div>
@@ -105,74 +115,125 @@
     <!-- 控制台 -->
     <div v-if="page==='dashboard' && isLoggedIn">
       <div class="stat-cards">
-        <div class="stat-card">
-          <div class="label">邮箱数量</div>
-          <div class="value">{{ stats.emails || 0 }}</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">服务配置</div>
-          <div class="value">{{ stats.servers || 0 }}</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">查询总数</div>
-          <div class="value">{{ stats.logs || 0 }}</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">成功查询</div>
-          <div class="value">{{ stats.successLogs || 0 }}</div>
-        </div>
+        <div class="stat-card"><div class="label">账号数量{{ isSuper ? '' : '（本团队）' }}</div><div class="value">{{ stats.emails || 0 }}</div></div>
+        <div v-if="isSuper" class="stat-card"><div class="label">团队数量</div><div class="value">{{ stats.teams || 0 }}</div></div>
+        <div class="stat-card"><div class="label">服务配置</div><div class="value">{{ stats.servers || 0 }}</div></div>
+        <div class="stat-card"><div class="label">查询总数</div><div class="value">{{ stats.logs || 0 }}</div></div>
+        <div class="stat-card"><div class="label">成功查询</div><div class="value">{{ stats.successLogs || 0 }}</div></div>
       </div>
     </div>
 
-    <!-- 邮箱管理 -->
-    <div v-if="page==='emails' && isLoggedIn" class="page-card">
-      <div class="page-title">邮箱管理</div>
+    <!-- 账号管理 -->
+    <div v-if="page==='accounts' && isLoggedIn" class="page-card">
+      <div class="page-title">账号管理</div>
       <div class="toolbar">
-        <el-input v-model="emailSearch" placeholder="搜索邮箱/令牌" size="default" style="width:250px" clearable @clear="loadEmails" @keyup.enter="loadEmails"></el-input>
-        <el-button type="primary" @click="loadEmails">搜索</el-button>
-        <el-button type="success" @click="showAddEmail">添加邮箱</el-button>
-        <el-button type="warning" @click="showImportEmails">批量导入</el-button>
-        <el-button type="danger" @click="deleteSelectedEmails" :disabled="!selectedEmails.length">批量删除</el-button>
+        <el-input v-model="accSearch" placeholder="搜索邮箱" style="width:200px" clearable @clear="loadAccounts" @keyup.enter="loadAccounts"></el-input>
+        <el-select v-model="accSourceFilter" placeholder="来源" clearable style="width:120px" @change="loadAccounts">
+          <el-option label="自管" value="self"></el-option><el-option label="171mail" value="forward"></el-option>
+        </el-select>
+        <el-select v-model="accHealthFilter" placeholder="状态" clearable style="width:120px" @change="loadAccounts">
+          <el-option v-for="h in healthOptions" :key="h.value" :label="h.label" :value="h.value"></el-option>
+        </el-select>
+        <el-button type="primary" @click="loadAccounts">搜索</el-button>
+        <el-button type="success" @click="showAddAccount">添加账号</el-button>
+        <el-button type="warning" @click="showImport">批量导入(自管)</el-button>
+        <el-button type="danger" @click="deleteSelectedAccounts" :disabled="!selectedAccounts.length">批量删除</el-button>
       </div>
-      <el-table :data="emailList" border stripe @selection-change="v => selectedEmails = v" max-height="500">
-        <el-table-column type="selection" width="45"></el-table-column>
-        <el-table-column prop="id" label="ID" width="60"></el-table-column>
-        <el-table-column prop="address" label="邮箱地址" min-width="200" show-overflow-tooltip></el-table-column>
-        <el-table-column prop="password" label="密码" width="150" show-overflow-tooltip></el-table-column>
-        <el-table-column prop="token" label="查询令牌" min-width="280" show-overflow-tooltip>
+      <el-table :data="accountList" border stripe @selection-change="v => selectedAccounts = v" max-height="560">
+        <el-table-column type="selection" width="42"></el-table-column>
+        <el-table-column prop="address" label="邮箱地址" min-width="190" show-overflow-tooltip></el-table-column>
+        <el-table-column label="来源" width="90" align="center">
+          <template #default="{row}"><el-tag size="small" :type="row.source==='forward'?'warning':'primary'">{{ row.source==='forward'?'171mail':'自管' }}</el-tag></template>
+        </el-table-column>
+        <el-table-column label="令牌" width="150">
           <template #default="{row}">
-            <div style="display:flex;align-items:center;gap:4px">
-              <span style="flex:1;overflow:hidden;text-overflow:ellipsis">{{ row.token }}</span>
-              <el-button link size="small" @click="copyText(row.token)">复制</el-button>
-            </div>
+            <span class="hint">{{ row.token_prefix || '—' }}</span>
+            <el-button link size="small" @click="rotateToken(row)">轮换</el-button>
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="80" align="center">
-          <template #default="{row}">
-            <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">{{ row.status === 1 ? '启用' : '禁用' }}</el-tag>
-          </template>
+        <el-table-column label="健康状态" width="110" align="center">
+          <template #default="{row}"><el-tag size="small" :type="healthTag(row.health_status)">{{ healthLabel(row.health_status) }}</el-tag></template>
         </el-table-column>
-        <el-table-column label="操作" width="180" align="center">
+        <el-table-column label="领用人" width="120" align="center">
+          <template #default="{row}"><span v-if="row.assignee_name">{{ row.assignee_name }}</span><span v-else class="hint">空闲</span></template>
+        </el-table-column>
+        <el-table-column v-if="isSuper" prop="team_name" label="团队" width="110"></el-table-column>
+        <el-table-column label="启用" width="70" align="center">
+          <template #default="{row}"><el-tag size="small" :type="row.status===1?'success':'info'">{{ row.status===1?'是':'否' }}</el-tag></template>
+        </el-table-column>
+        <el-table-column label="操作" width="300" align="center">
           <template #default="{row}">
-            <el-button link size="small" type="primary" @click="editEmail(row)">编辑</el-button>
-            <el-button link size="small" type="success" @click="testEmail(row)">测试</el-button>
-            <el-popconfirm title="确定删除？" @confirm="deleteEmail(row.id)">
+            <el-button link size="small" type="primary" @click="editAccount(row)">编辑</el-button>
+            <el-button link size="small" @click="showStatus(row)">状态</el-button>
+            <el-button v-if="!row.assignee_id" link size="small" type="success" @click="claim(row)">领用</el-button>
+            <el-button v-else-if="row.assignee_id===me.id || isManager" link size="small" type="warning" @click="release(row)">释放</el-button>
+            <el-button link size="small" @click="fetchFromRow(row)">取码</el-button>
+            <el-popconfirm title="确定删除？" @confirm="deleteAccount(row.id)">
               <template #reference><el-button link size="small" type="danger">删除</el-button></template>
             </el-popconfirm>
           </template>
         </el-table-column>
       </el-table>
       <div style="margin-top:16px;display:flex;justify-content:flex-end">
-        <el-pagination background layout="total, prev, pager, next" :total="emailTotal"
-          :page-size="30" :current-page="emailPage" @current-change="v => { emailPage=v; loadEmails() }" />
+        <el-pagination background layout="total, prev, pager, next" :total="accTotal" :page-size="30" :current-page="accPage" @current-change="v => { accPage=v; loadAccounts() }" />
       </div>
+    </div>
+
+    <!-- 团队管理 -->
+    <div v-if="page==='teams' && isSuper" class="page-card">
+      <div class="page-title">团队管理</div>
+      <div class="toolbar"><el-button type="success" @click="showAddTeam">新建团队</el-button></div>
+      <el-table :data="teamList" border stripe>
+        <el-table-column prop="id" label="ID" width="60"></el-table-column>
+        <el-table-column prop="name" label="团队名称" min-width="160"></el-table-column>
+        <el-table-column prop="remark" label="备注" min-width="200" show-overflow-tooltip></el-table-column>
+        <el-table-column prop="member_count" label="成员数" width="90" align="center"></el-table-column>
+        <el-table-column prop="account_count" label="账号数" width="90" align="center"></el-table-column>
+        <el-table-column label="操作" width="150" align="center">
+          <template #default="{row}">
+            <el-button link size="small" type="primary" @click="editTeam(row)">编辑</el-button>
+            <el-popconfirm title="确定删除？" @confirm="deleteTeam(row.id)"><template #reference><el-button link size="small" type="danger">删除</el-button></template></el-popconfirm>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
+
+    <!-- 用户管理 -->
+    <div v-if="page==='users' && canManageUsers" class="page-card">
+      <div class="page-title">用户管理</div>
+      <div class="toolbar">
+        <el-input v-model="userSearch" placeholder="搜索用户名" style="width:200px" clearable @clear="loadUsers" @keyup.enter="loadUsers"></el-input>
+        <el-button type="primary" @click="loadUsers">搜索</el-button>
+        <el-button type="success" @click="showAddUser">新建用户</el-button>
+      </div>
+      <el-table :data="userList" border stripe>
+        <el-table-column prop="id" label="ID" width="60"></el-table-column>
+        <el-table-column prop="username" label="用户名" min-width="140"></el-table-column>
+        <el-table-column label="角色" width="120" align="center">
+          <template #default="{row}"><el-tag size="small" :type="roleTag(row.role).type">{{ roleTag(row.role).label }}</el-tag></template>
+        </el-table-column>
+        <el-table-column prop="team_name" label="团队" width="120"></el-table-column>
+        <el-table-column label="API Key" width="100" align="center">
+          <template #default="{row}"><el-tag size="small" :type="row.has_api_key?'success':'info'">{{ row.has_api_key?'已设':'未设' }}</el-tag></template>
+        </el-table-column>
+        <el-table-column label="状态" width="80" align="center">
+          <template #default="{row}"><el-tag size="small" :type="row.status===1?'success':'danger'">{{ row.status===1?'正常':'停用' }}</el-tag></template>
+        </el-table-column>
+        <el-table-column label="操作" width="200" align="center">
+          <template #default="{row}">
+            <el-button link size="small" type="primary" @click="editUser(row)">编辑</el-button>
+            <el-button link size="small" @click="resetUserPwd(row)">重置密码</el-button>
+            <el-popconfirm v-if="row.id!==me.id" title="确定删除？" @confirm="deleteUser(row.id)"><template #reference><el-button link size="small" type="danger">删除</el-button></template></el-popconfirm>
+          </template>
+        </el-table-column>
+      </el-table>
     </div>
 
     <!-- 服务配置 -->
     <div v-if="page==='servers' && isLoggedIn" class="page-card">
       <div class="page-title">邮件服务配置</div>
       <div class="toolbar">
-        <el-input v-model="serverSearch" placeholder="搜索域名/地址" size="default" style="width:250px" clearable @clear="loadServers" @keyup.enter="loadServers"></el-input>
+        <el-input v-model="serverSearch" placeholder="搜索域名/地址" style="width:220px" clearable @clear="loadServers" @keyup.enter="loadServers"></el-input>
         <el-button type="primary" @click="loadServers">搜索</el-button>
         <el-button type="success" @click="showAddServer">添加服务</el-button>
       </div>
@@ -181,18 +242,12 @@
         <el-table-column prop="domain" label="邮箱域名" min-width="150"></el-table-column>
         <el-table-column prop="host" label="IMAP 服务器" min-width="200"></el-table-column>
         <el-table-column prop="port" label="端口" width="80" align="center"></el-table-column>
-        <el-table-column prop="use_ssl" label="SSL" width="70" align="center">
-          <template #default="{row}"><el-tag :type="row.use_ssl?'success':'info'" size="small">{{ row.use_ssl?'是':'否' }}</el-tag></template>
-        </el-table-column>
-        <el-table-column prop="status" label="状态" width="80" align="center">
-          <template #default="{row}"><el-tag :type="row.status===1?'success':'danger'" size="small">{{ row.status===1?'启用':'禁用' }}</el-tag></template>
-        </el-table-column>
+        <el-table-column prop="use_ssl" label="SSL" width="70" align="center"><template #default="{row}"><el-tag :type="row.use_ssl?'success':'info'" size="small">{{ row.use_ssl?'是':'否' }}</el-tag></template></el-table-column>
+        <el-table-column prop="status" label="状态" width="80" align="center"><template #default="{row}"><el-tag :type="row.status===1?'success':'danger'" size="small">{{ row.status===1?'启用':'禁用' }}</el-tag></template></el-table-column>
         <el-table-column label="操作" width="150" align="center">
           <template #default="{row}">
             <el-button link size="small" type="primary" @click="editServer(row)">编辑</el-button>
-            <el-popconfirm title="确定删除？" @confirm="deleteServer(row.id)">
-              <template #reference><el-button link size="small" type="danger">删除</el-button></template>
-            </el-popconfirm>
+            <el-popconfirm title="确定删除？" @confirm="deleteServer(row.id)"><template #reference><el-button link size="small" type="danger">删除</el-button></template></el-popconfirm>
           </template>
         </el-table-column>
       </el-table>
@@ -200,117 +255,188 @@
 
     <!-- 查询日志 -->
     <div v-if="page==='logs' && isLoggedIn" class="page-card">
-      <div class="page-title">查询日志</div>
+      <div class="page-title">查询日志{{ isSuper ? '' : '（本团队）' }}</div>
       <div class="toolbar">
-        <el-input v-model="logSearch" placeholder="搜索" size="default" style="width:250px" clearable @clear="loadLogs" @keyup.enter="loadLogs"></el-input>
+        <el-input v-model="logSearch" placeholder="搜索邮箱/类型" style="width:220px" clearable @clear="loadLogs" @keyup.enter="loadLogs"></el-input>
         <el-button type="primary" @click="loadLogs">搜索</el-button>
-        <el-popconfirm title="清空所有日志？" @confirm="clearLogs">
-          <template #reference><el-button type="danger">清空日志</el-button></template>
-        </el-popconfirm>
+        <el-popconfirm v-if="isSuper" title="清空所有日志？" @confirm="clearLogs"><template #reference><el-button type="danger">清空日志</el-button></template></el-popconfirm>
       </div>
       <el-table :data="logList" border stripe max-height="500">
         <el-table-column prop="id" label="ID" width="60"></el-table-column>
-        <el-table-column prop="email_address" label="邮箱" min-width="200" show-overflow-tooltip></el-table-column>
-        <el-table-column prop="query_type" label="类型" width="100"></el-table-column>
-        <el-table-column prop="code" label="验证码" width="150" show-overflow-tooltip></el-table-column>
-        <el-table-column prop="subject" label="邮件主题" min-width="200" show-overflow-tooltip></el-table-column>
-        <el-table-column prop="success" label="结果" width="80" align="center">
-          <template #default="{row}"><el-tag :type="row.success?'success':'danger'" size="small">{{ row.success?'成功':'失败' }}</el-tag></template>
-        </el-table-column>
-        <el-table-column prop="error_msg" label="错误信息" min-width="200" show-overflow-tooltip></el-table-column>
+        <el-table-column prop="email_address" label="邮箱" min-width="190" show-overflow-tooltip></el-table-column>
+        <el-table-column prop="query_type" label="类型" width="90"></el-table-column>
+        <el-table-column prop="code" label="验证码(掩码)" width="130" show-overflow-tooltip></el-table-column>
+        <el-table-column prop="subject" label="邮件主题" min-width="180" show-overflow-tooltip></el-table-column>
+        <el-table-column prop="success" label="结果" width="70" align="center"><template #default="{row}"><el-tag :type="row.success?'success':'danger'" size="small">{{ row.success?'成功':'失败' }}</el-tag></template></el-table-column>
+        <el-table-column prop="error_msg" label="错误信息" min-width="180" show-overflow-tooltip></el-table-column>
         <el-table-column prop="created_at" label="时间" width="160"></el-table-column>
       </el-table>
       <div style="margin-top:16px;display:flex;justify-content:flex-end">
-        <el-pagination background layout="total, prev, pager, next" :total="logTotal"
-          :page-size="30" :current-page="logPage" @current-change="v => { logPage=v; loadLogs() }" />
+        <el-pagination background layout="total, prev, pager, next" :total="logTotal" :page-size="30" :current-page="logPage" @current-change="v => { logPage=v; loadLogs() }" />
       </div>
+    </div>
+
+    <!-- 个人 -->
+    <div v-if="page==='profile' && isLoggedIn" class="page-card" style="max-width:560px">
+      <div class="page-title">个人设置</div>
+      <el-descriptions :column="1" border style="margin-bottom:24px">
+        <el-descriptions-item label="用户名">{{ me.username }}</el-descriptions-item>
+        <el-descriptions-item label="角色">{{ roleTag(me.role).label }}</el-descriptions-item>
+        <el-descriptions-item label="团队">{{ me.team_name || '—' }}</el-descriptions-item>
+      </el-descriptions>
+      <h3 style="margin-bottom:8px;font-size:15px">API Key（用于 CLI / 脚本按邮箱接码）</h3>
+      <p class="hint" style="margin-bottom:8px">状态：{{ me.has_api_key ? '已设置' : '未设置' }}。重置后旧 Key 立即失效，新 Key 仅显示一次。</p>
+      <el-button @click="genApiKey" style="margin-bottom:24px">{{ me.has_api_key ? '重置' : '生成' }} API Key</el-button>
+      <h3 style="margin-bottom:8px;font-size:15px">修改密码</h3>
+      <el-form label-width="90px" style="max-width:420px">
+        <el-form-item label="原密码"><el-input v-model="pwdForm.oldPassword" type="password" show-password></el-input></el-form-item>
+        <el-form-item label="新密码"><el-input v-model="pwdForm.newPassword" type="password" show-password></el-input></el-form-item>
+        <el-button type="primary" @click="changePwd">保存新密码</el-button>
+      </el-form>
     </div>
   </div>
 
-  <!-- 添加/编辑邮箱对话框 -->
-  <el-dialog v-model="emailDialog" :title="emailForm.id ? '编辑邮箱' : '添加邮箱'" width="500px">
-    <el-form label-width="80px">
-      <el-form-item label="邮箱地址" required>
-        <el-input v-model="emailForm.address" placeholder="user@example.com"></el-input>
+  <!-- 账号 新增/编辑 -->
+  <el-dialog v-model="accDialog" :title="accForm.id ? '编辑账号' : '添加账号'" width="520px">
+    <el-form label-width="92px">
+      <el-form-item label="来源" required>
+        <el-radio-group v-model="accForm.source" :disabled="!!accForm.id">
+          <el-radio value="self">自管（本地 IMAP）</el-radio>
+          <el-radio value="forward">171mail 转发</el-radio>
+        </el-radio-group>
       </el-form-item>
-      <el-form-item label="密码">
-        <el-input v-model="emailForm.password" placeholder="邮箱密码" show-password></el-input>
+      <el-form-item label="邮箱地址" required><el-input v-model="accForm.address" placeholder="user@example.com"></el-input></el-form-item>
+      <template v-if="accForm.source==='self'">
+        <el-form-item label="邮箱密码"><el-input v-model="accForm.password" :placeholder="accForm.id?'留空则不修改':'IMAP/应用专用密码'" show-password></el-input></el-form-item>
+        <el-form-item label="应用密钥"><el-input v-model="accForm.appkey" placeholder="可选"></el-input></el-form-item>
+      </template>
+      <template v-else>
+        <el-form-item label="上游"><el-input v-model="accForm.forward_provider" placeholder="171mail"></el-input></el-form-item>
+        <el-form-item label="上游令牌" :required="!accForm.id"><el-input v-model="accForm.forward_token" :placeholder="accForm.id?'留空则不修改':'171mail 的 token'"></el-input></el-form-item>
+      </template>
+      <el-form-item v-if="isSuper" label="团队">
+        <el-select v-model="accForm.team_id" placeholder="选择团队" style="width:100%">
+          <el-option v-for="t in teamList" :key="t.id" :label="t.name" :value="t.id"></el-option>
+        </el-select>
       </el-form-item>
-      <el-form-item label="应用密钥">
-        <el-input v-model="emailForm.appkey" placeholder="可选"></el-input>
-      </el-form-item>
-      <el-form-item label="查询令牌">
-        <el-input v-model="emailForm.token" placeholder="留空自动生成"></el-input>
-      </el-form-item>
-      <el-form-item label="状态">
-        <el-switch v-model="emailForm.status" :active-value="1" :inactive-value="0"></el-switch>
-      </el-form-item>
+      <el-form-item v-if="accForm.id" label="启用"><el-switch v-model="accForm.status" :active-value="1" :inactive-value="0"></el-switch></el-form-item>
     </el-form>
-    <template #footer>
-      <el-button @click="emailDialog=false">取消</el-button>
-      <el-button type="primary" :loading="emailSaving" @click="saveEmail">保存</el-button>
-    </template>
+    <template #footer><el-button @click="accDialog=false">取消</el-button><el-button type="primary" :loading="accSaving" @click="saveAccount">保存</el-button></template>
   </el-dialog>
 
-  <!-- 批量导入对话框 -->
-  <el-dialog v-model="importDialog" title="批量导入邮箱" width="600px">
-    <p style="margin-bottom:12px;font-size:13px;color:#909399">每行一个邮箱，格式：邮箱地址----密码----应用密钥（密码和密钥可选）</p>
-    <el-input v-model="importText" type="textarea" :rows="10" class="import-textarea"
-      placeholder="user1@mail.com----password1&#10;user2@mail.com----password2&#10;user3@mail.com" />
-    <template #footer>
-      <el-button @click="importDialog=false">取消</el-button>
-      <el-button type="primary" :loading="importLoading" @click="doImport">导入</el-button>
-    </template>
+  <!-- 状态变更 -->
+  <el-dialog v-model="statusDialog" title="变更健康状态" width="420px">
+    <el-form label-width="80px">
+      <el-form-item label="状态"><el-select v-model="statusForm.health_status" style="width:100%"><el-option v-for="h in healthOptions" :key="h.value" :label="h.label" :value="h.value"></el-option></el-select></el-form-item>
+      <el-form-item label="原因"><el-input v-model="statusForm.reason" placeholder="可选，记入审计"></el-input></el-form-item>
+    </el-form>
+    <template #footer><el-button @click="statusDialog=false">取消</el-button><el-button type="primary" @click="saveStatus">确定</el-button></template>
   </el-dialog>
 
-  <!-- 添加/编辑服务对话框 -->
+  <!-- 团队 新增/编辑 -->
+  <el-dialog v-model="teamDialog" :title="teamForm.id ? '编辑团队' : '新建团队'" width="440px">
+    <el-form label-width="80px">
+      <el-form-item label="名称" required><el-input v-model="teamForm.name"></el-input></el-form-item>
+      <el-form-item label="备注"><el-input v-model="teamForm.remark"></el-input></el-form-item>
+    </el-form>
+    <template #footer><el-button @click="teamDialog=false">取消</el-button><el-button type="primary" @click="saveTeam">保存</el-button></template>
+  </el-dialog>
+
+  <!-- 用户 新增/编辑 -->
+  <el-dialog v-model="userDialog" :title="userForm.id ? '编辑用户' : '新建用户'" width="440px">
+    <el-form label-width="80px">
+      <el-form-item label="用户名" required><el-input v-model="userForm.username" :disabled="!!userForm.id"></el-input></el-form-item>
+      <el-form-item v-if="!userForm.id" label="密码" required><el-input v-model="userForm.password" type="password" show-password></el-input></el-form-item>
+      <el-form-item label="角色">
+        <el-select v-model="userForm.role" style="width:100%" @change="onRoleChange">
+          <el-option v-if="isSuper" label="超级管理员" value="super_admin"></el-option>
+          <el-option v-if="isSuper" label="团队管理员" value="team_admin"></el-option>
+          <el-option label="成员" value="member"></el-option>
+        </el-select>
+      </el-form-item>
+      <el-form-item v-if="isSuper && userForm.role!=='super_admin'" label="团队">
+        <el-select v-model="userForm.team_id" style="width:100%"><el-option v-for="t in teamList" :key="t.id" :label="t.name" :value="t.id"></el-option></el-select>
+      </el-form-item>
+      <el-form-item v-if="userForm.id" label="状态"><el-switch v-model="userForm.status" :active-value="1" :inactive-value="0"></el-switch></el-form-item>
+    </el-form>
+    <template #footer><el-button @click="userDialog=false">取消</el-button><el-button type="primary" @click="saveUser">保存</el-button></template>
+  </el-dialog>
+
+  <!-- 服务 新增/编辑 -->
   <el-dialog v-model="serverDialog" :title="serverForm.id ? '编辑服务' : '添加服务'" width="500px">
     <el-form label-width="100px">
-      <el-form-item label="邮箱域名" required>
-        <el-input v-model="serverForm.domain" placeholder="例: gmail.com"></el-input>
-      </el-form-item>
-      <el-form-item label="IMAP 地址" required>
-        <el-input v-model="serverForm.host" placeholder="例: imap.gmail.com"></el-input>
-      </el-form-item>
-      <el-form-item label="端口">
-        <el-input-number v-model="serverForm.port" :min="1" :max="65535"></el-input-number>
-      </el-form-item>
-      <el-form-item label="SSL">
-        <el-switch v-model="serverForm.use_ssl" :active-value="1" :inactive-value="0"></el-switch>
-      </el-form-item>
-      <el-form-item label="状态">
-        <el-switch v-model="serverForm.status" :active-value="1" :inactive-value="0"></el-switch>
-      </el-form-item>
+      <el-form-item label="邮箱域名" required><el-input v-model="serverForm.domain" placeholder="例: gmail.com"></el-input></el-form-item>
+      <el-form-item label="IMAP 地址" required><el-input v-model="serverForm.host" placeholder="例: imap.gmail.com"></el-input></el-form-item>
+      <el-form-item label="端口"><el-input-number v-model="serverForm.port" :min="1" :max="65535"></el-input-number></el-form-item>
+      <el-form-item label="SSL"><el-switch v-model="serverForm.use_ssl" :active-value="1" :inactive-value="0"></el-switch></el-form-item>
+      <el-form-item label="状态"><el-switch v-model="serverForm.status" :active-value="1" :inactive-value="0"></el-switch></el-form-item>
     </el-form>
+    <template #footer><el-button @click="serverDialog=false">取消</el-button><el-button type="primary" :loading="serverSaving" @click="saveServer">保存</el-button></template>
+  </el-dialog>
+
+  <!-- 批量导入(自管) -->
+  <el-dialog v-model="importDialog" title="批量导入自管账号" width="600px">
+    <p class="hint" style="margin-bottom:12px">每行一个，格式：邮箱地址----密码----应用密钥（密码/密钥可选）。导入后将一次性展示各账号令牌。</p>
+    <el-input v-model="importText" type="textarea" :rows="10" class="import-textarea" placeholder="user1@mail.com----password1&#10;user2@mail.com----password2" />
+    <template #footer><el-button @click="importDialog=false">取消</el-button><el-button type="primary" :loading="importLoading" @click="doImport">导入</el-button></template>
+  </el-dialog>
+
+  <!-- 一次性密钥展示 -->
+  <el-dialog v-model="secretDialog.show" :title="secretDialog.title" width="520px">
+    <p class="hint">⚠ 以下内容仅显示这一次，请立即复制保存。</p>
+    <div class="secret-box">{{ secretDialog.value }}</div>
+    <div v-if="secretDialog.list.length">
+      <el-table :data="secretDialog.list" border size="small" max-height="300">
+        <el-table-column prop="address" label="邮箱" min-width="180"></el-table-column>
+        <el-table-column prop="token" label="令牌" min-width="240" show-overflow-tooltip></el-table-column>
+      </el-table>
+    </div>
     <template #footer>
-      <el-button @click="serverDialog=false">取消</el-button>
-      <el-button type="primary" :loading="serverSaving" @click="saveServer">保存</el-button>
+      <el-button v-if="secretDialog.value" type="primary" @click="copyText(secretDialog.value)">复制</el-button>
+      <el-button @click="secretDialog.show=false">关闭</el-button>
     </template>
   </el-dialog>
 </div>
 
 <script>
 const { createApp, ref, reactive, computed, onMounted, watch } = Vue;
+const { ElMessage, ElMessageBox } = ElementPlus;
 
-const app = createApp({
+createApp({
   setup() {
     const API = '';
     const page = ref('code');
-    const token = ref(localStorage.getItem('admin_token') || '');
-    const adminUser = ref(localStorage.getItem('admin_user') || '');
+    const token = ref(localStorage.getItem('mc_token') || '');
+    const me = reactive(JSON.parse(localStorage.getItem('mc_me') || '{}'));
     const isLoggedIn = computed(() => !!token.value);
+    const isSuper = computed(() => me.role === 'super_admin');
+    const isManager = computed(() => me.role === 'super_admin' || me.role === 'team_admin');
+    const canManageUsers = computed(() => isManager.value);
 
-    function authHeaders() {
-      return { Authorization: 'Bearer ' + token.value, 'Content-Type': 'application/json' };
-    }
     async function api(method, url, data) {
-      const opts = { method, headers: authHeaders() };
+      const headers = { 'Content-Type': 'application/json' };
+      if (token.value) headers.Authorization = 'Bearer ' + token.value;
+      const opts = { method, headers };
       if (data && method !== 'GET') opts.body = JSON.stringify(data);
       const resp = await fetch(API + url, opts);
+      if (resp.status === 401 && token.value) { logout(); ElMessage.error('登录已过期'); }
       return resp.json();
     }
+    const ok = (r, msg) => { if (r.code === 200) { if (msg) ElMessage.success(msg); return true; } ElMessage.error(r.message || '操作失败'); return false; };
 
-    // Login
+    function roleTag(role) {
+      return { super_admin: { label: '超管', type: 'danger' }, team_admin: { label: '团队管理', type: 'warning' }, member: { label: '成员', type: 'info' } }[role] || { label: role, type: 'info' };
+    }
+    const healthOptions = [
+      { value: 'active', label: '正常' }, { value: 'error', label: '异常' },
+      { value: 'banned', label: '封禁' }, { value: 'expired', label: '到期' }, { value: 'disabled', label: '停用' },
+    ];
+    const healthLabel = (h) => (healthOptions.find(o => o.value === h) || {}).label || h;
+    const healthTag = (h) => ({ active: 'success', error: 'danger', banned: 'danger', expired: 'warning', disabled: 'info' }[h] || 'info');
+
+    function go(p) { page.value = p; }
+
+    // ── Login ──
     const loginForm = reactive({ username: '', password: '' });
     const loginLoading = ref(false);
     async function doLogin() {
@@ -319,210 +445,217 @@ const app = createApp({
         const r = await api('POST', '/api/admin/login', loginForm);
         if (r.code === 200) {
           token.value = r.data.accessToken;
-          adminUser.value = r.data.username;
-          localStorage.setItem('admin_token', token.value);
-          localStorage.setItem('admin_user', adminUser.value);
-          page.value = 'dashboard';
-          loadStats();
-          ElementPlus.ElMessage.success('登录成功');
-        } else {
-          ElementPlus.ElMessage.error(r.message);
-        }
+          Object.assign(me, { id: r.data.id, username: r.data.username, role: r.data.role, team_id: r.data.team_id, team_name: r.data.team_name });
+          localStorage.setItem('mc_token', token.value);
+          persistMe();
+          await loadMe();
+          page.value = 'dashboard'; loadStats();
+          ElMessage.success('登录成功');
+        } else ElMessage.error(r.message);
       } finally { loginLoading.value = false; }
     }
+    function persistMe() { localStorage.setItem('mc_me', JSON.stringify(me)); }
+    async function loadMe() {
+      const r = await api('GET', '/api/admin/me');
+      if (r.code === 200) { Object.assign(me, r.data); persistMe(); }
+    }
     function logout() {
-      token.value = '';
-      adminUser.value = '';
-      localStorage.removeItem('admin_token');
-      localStorage.removeItem('admin_user');
+      token.value = ''; Object.keys(me).forEach(k => delete me[k]);
+      localStorage.removeItem('mc_token'); localStorage.removeItem('mc_me');
       page.value = 'code';
     }
 
-    // Code fetching
-    const codeForm = reactive({ token: '', type: 'gpt' });
+    // ── Code fetching ──
+    const codeForm = reactive({ mode: token.value ? 'email' : 'token', token: '', email: '', type: 'gpt' });
     const codeTypes = [
-      { label: 'ChatGPT', value: 'gpt' },
-      { label: 'Claude', value: 'claude' },
-      { label: 'Google', value: 'google' },
-      { label: 'Telegram', value: 'telegram' },
-      { label: 'Grok', value: 'grok' },
-      { label: '全部 (不过滤)', value: 'all' },
+      { label: 'ChatGPT', value: 'gpt' }, { label: 'Claude', value: 'claude' }, { label: 'Google', value: 'google' },
+      { label: 'Telegram', value: 'telegram' }, { label: 'Grok', value: 'grok' }, { label: 'Chipper', value: 'chipper' }, { label: '全部', value: 'all' },
     ];
-    const codeLoading = ref(false);
-    const codeResult = ref('');
-    const codeResultType = ref('info');
+    const codeLoading = ref(false), codeResult = ref(''), codeResultType = ref('info');
     async function fetchCode() {
-      if (!codeForm.token) { ElementPlus.ElMessage.warning('请填写查询令牌'); return; }
+      let url;
+      if (codeForm.mode === 'email') {
+        if (!codeForm.email) { ElMessage.warning('请选择/输入邮箱'); return; }
+        url = `/api/v1/message?email=${encodeURIComponent(codeForm.email)}&type=${codeForm.type}`;
+      } else {
+        if (!codeForm.token) { ElMessage.warning('请填写令牌'); return; }
+        url = `/api/v1/message?token=${encodeURIComponent(codeForm.token)}&type=${codeForm.type}`;
+      }
       codeLoading.value = true; codeResult.value = ''; codeResultType.value = 'info';
       try {
-        const r = await fetch(`${API}/api/v1/message?token=${encodeURIComponent(codeForm.token)}&type=${codeForm.type}`);
-        const d = await r.json();
-        if (d.code === 200 && d.message === 'success' && d.data?.code) {
-          codeResult.value = d.data.code;
-          codeResultType.value = 'success';
-        } else if (d.message === 'no new message') {
-          codeResult.value = '未获取到验证码（10分钟内无新邮件）';
-          codeResultType.value = 'info';
-        } else {
-          codeResult.value = d.message || '查询失败';
-          codeResultType.value = 'error';
-        }
-      } catch(e) {
-        codeResult.value = '请求失败: ' + e.message;
-        codeResultType.value = 'error';
-      } finally { codeLoading.value = false; }
+        const headers = {};
+        if (codeForm.mode === 'email' && token.value) headers.Authorization = 'Bearer ' + token.value;
+        const d = await (await fetch(API + url, { headers })).json();
+        if (d.code === 200 && d.data?.code) { codeResult.value = d.data.code; codeResultType.value = 'success'; }
+        else if (d.message === 'no new message') { codeResult.value = '未获取到验证码（10 分钟内无新邮件）'; codeResultType.value = 'info'; }
+        else { codeResult.value = d.message || '查询失败'; codeResultType.value = 'error'; }
+      } catch (e) { codeResult.value = '请求失败: ' + e.message; codeResultType.value = 'error'; }
+      finally { codeLoading.value = false; }
     }
-    function copyCode() { navigator.clipboard.writeText(codeResult.value); ElementPlus.ElMessage.success('已复制'); }
-    function copyText(t) { navigator.clipboard.writeText(t); ElementPlus.ElMessage.success('已复制'); }
+    function fetchFromRow(row) { codeForm.mode = 'email'; codeForm.email = row.address; page.value = 'code'; fetchCode(); }
+    function copyText(t) { navigator.clipboard.writeText(t); ElMessage.success('已复制'); }
 
-    // Stats
-    const stats = reactive({ emails: 0, servers: 0, logs: 0, successLogs: 0 });
-    async function loadStats() {
+    // ── Stats ──
+    const stats = reactive({});
+    async function loadStats() { const r = await api('GET', '/api/admin/stats'); if (r.code === 200) Object.assign(stats, r.data); }
+
+    // ── Accounts ──
+    const accountList = ref([]), accTotal = ref(0), accPage = ref(1);
+    const accSearch = ref(''), accSourceFilter = ref(''), accHealthFilter = ref('');
+    const selectedAccounts = ref([]);
+    const accDialog = ref(false), accSaving = ref(false);
+    const accForm = reactive({ id: null, source: 'self', address: '', password: '', appkey: '', forward_provider: '171mail', forward_token: '', team_id: null, status: 1 });
+    let accountsLoaded = false;
+    async function loadAccounts() {
+      const q = `page=${accPage.value}&pageSize=30&keyword=${encodeURIComponent(accSearch.value)}&source=${accSourceFilter.value}&health=${accHealthFilter.value}`;
+      const r = await api('GET', '/api/admin/email/list?' + q);
+      if (r.code === 200) { accountList.value = r.data.list; accTotal.value = r.data.total; accountsLoaded = true; }
+    }
+    function ensureAccountsLoaded() { if (!accountsLoaded && isLoggedIn.value) loadAccounts(); }
+    function showAddAccount() {
+      Object.assign(accForm, { id: null, source: 'self', address: '', password: '', appkey: '', forward_provider: '171mail', forward_token: '', team_id: me.team_id || null, status: 1 });
+      if (isSuper.value) loadTeams();
+      accDialog.value = true;
+    }
+    function editAccount(row) {
+      Object.assign(accForm, { id: row.id, source: row.source, address: row.address, password: '', appkey: row.appkey, forward_provider: row.forward_provider || '171mail', forward_token: '', team_id: row.team_id, status: row.status });
+      if (isSuper.value) loadTeams();
+      accDialog.value = true;
+    }
+    async function saveAccount() {
+      accSaving.value = true;
       try {
-        const r = await api('GET', '/api/admin/stats');
-        if (r.code === 200) Object.assign(stats, r.data);
-      } catch(e) {}
+        const method = accForm.id ? 'PUT' : 'POST';
+        const url = accForm.id ? '/api/admin/email/update' : '/api/admin/email/create';
+        const r = await api(method, url, accForm);
+        if (r.code === 200) {
+          accDialog.value = false; loadAccounts();
+          if (!accForm.id && r.data?.token) showSecret('账号已创建 — 查询令牌', r.data.token);
+          else ElMessage.success('保存成功');
+        } else ElMessage.error(r.message);
+      } finally { accSaving.value = false; }
     }
+    async function deleteAccount(id) { if (ok(await api('DELETE', '/api/admin/email/delete/' + id))) loadAccounts(); }
+    async function deleteSelectedAccounts() { if (ok(await api('POST', '/api/admin/email/delete-batch', { ids: selectedAccounts.value.map(a => a.id) }), '已删除')) loadAccounts(); }
+    async function rotateToken(row) {
+      await ElMessageBox.confirm('轮换后旧令牌立即失效，确定？', '提示', { type: 'warning' });
+      const r = await api('POST', '/api/admin/email/rotate-token', { id: row.id });
+      if (r.code === 200) { showSecret('新查询令牌', r.data.token); loadAccounts(); } else ElMessage.error(r.message);
+    }
+    async function claim(row) { if (ok(await api('POST', '/api/admin/email/assign', { id: row.id, assignee_id: me.id }), '已领用')) loadAccounts(); }
+    async function release(row) { if (ok(await api('POST', '/api/admin/email/assign', { id: row.id, assignee_id: null }), '已释放')) loadAccounts(); }
 
-    // Emails
-    const emailList = ref([]);
-    const emailTotal = ref(0);
-    const emailPage = ref(1);
-    const emailSearch = ref('');
-    const selectedEmails = ref([]);
-    const emailDialog = ref(false);
-    const emailSaving = ref(false);
-    const emailForm = reactive({ id: null, address: '', password: '', appkey: '', token: '', status: 1 });
-    const importDialog = ref(false);
-    const importText = ref('');
-    const importLoading = ref(false);
+    const statusDialog = ref(false);
+    const statusForm = reactive({ id: null, health_status: 'active', reason: '' });
+    function showStatus(row) { Object.assign(statusForm, { id: row.id, health_status: row.health_status, reason: '' }); statusDialog.value = true; }
+    async function saveStatus() { if (ok(await api('POST', '/api/admin/email/set-status', statusForm), '已更新')) { statusDialog.value = false; loadAccounts(); } }
 
-    async function loadEmails() {
-      const r = await api('GET', `/api/admin/email/list?page=${emailPage.value}&pageSize=30&keyword=${emailSearch.value}`);
-      if (r.code === 200) { emailList.value = r.data.list; emailTotal.value = r.data.total; }
-    }
-    function showAddEmail() {
-      Object.assign(emailForm, { id: null, address: '', password: '', appkey: '', token: '', status: 1 });
-      emailDialog.value = true;
-    }
-    function editEmail(row) {
-      Object.assign(emailForm, row);
-      emailDialog.value = true;
-    }
-    async function saveEmail() {
-      emailSaving.value = true;
-      try {
-        const method = emailForm.id ? 'PUT' : 'POST';
-        const url = emailForm.id ? '/api/admin/email/update' : '/api/admin/email/create';
-        const r = await api(method, url, emailForm);
-        if (r.code === 200) { emailDialog.value = false; loadEmails(); ElementPlus.ElMessage.success('保存成功'); }
-        else ElementPlus.ElMessage.error(r.message);
-      } finally { emailSaving.value = false; }
-    }
-    async function deleteEmail(id) {
-      await api('DELETE', `/api/admin/email/delete/${id}`);
-      loadEmails();
-    }
-    async function deleteSelectedEmails() {
-      if (!selectedEmails.value.length) return;
-      await api('POST', '/api/admin/email/delete-batch', { ids: selectedEmails.value.map(e => e.id) });
-      loadEmails();
-    }
-    function showImportEmails() { importText.value = ''; importDialog.value = true; }
+    // ── Import ──
+    const importDialog = ref(false), importText = ref(''), importLoading = ref(false);
+    function showImport() { importText.value = ''; importDialog.value = true; }
     async function doImport() {
       const lines = importText.value.split('\n').map(l => l.trim()).filter(Boolean);
-      if (!lines.length) { ElementPlus.ElMessage.warning('请输入邮箱数据'); return; }
+      if (!lines.length) { ElMessage.warning('请输入数据'); return; }
       importLoading.value = true;
       try {
-        const r = await api('POST', '/api/admin/email/import', { emails: lines });
-        if (r.code === 200) {
-          importDialog.value = false;
-          loadEmails();
-          ElementPlus.ElMessage.success(r.message);
-        } else ElementPlus.ElMessage.error(r.message);
+        const r = await api('POST', '/api/admin/email/import', { emails: lines, team_id: accForm.team_id });
+        if (r.code === 200) { importDialog.value = false; loadAccounts(); showSecret(`成功导入 ${r.data.imported} 个账号 — 各账号令牌`, '', r.data.tokens || []); }
+        else ElMessage.error(r.message);
       } finally { importLoading.value = false; }
     }
-    async function testEmail(row) {
-      ElementPlus.ElMessage.info('正在测试 IMAP 连接...');
-      const r = await api('POST', '/api/admin/email/test-connection', { address: row.address, password: row.password });
-      if (r.code === 200) ElementPlus.ElMessage.success(`连接成功! 服务器: ${r.data.server}, 邮件数: ${r.data.messages}`);
-      else ElementPlus.ElMessage.error(r.message);
+
+    // ── one-time secret dialog ──
+    const secretDialog = reactive({ show: false, title: '', value: '', list: [] });
+    function showSecret(title, value, list = []) { Object.assign(secretDialog, { show: true, title, value, list }); }
+
+    // ── Teams ──
+    const teamList = ref([]);
+    async function loadTeams() { const r = await api('GET', '/api/admin/team/list'); if (r.code === 200) teamList.value = r.data.list; }
+    const teamDialog = ref(false), teamForm = reactive({ id: null, name: '', remark: '' });
+    function showAddTeam() { Object.assign(teamForm, { id: null, name: '', remark: '' }); teamDialog.value = true; }
+    function editTeam(row) { Object.assign(teamForm, { id: row.id, name: row.name, remark: row.remark }); teamDialog.value = true; }
+    async function saveTeam() {
+      const r = await api(teamForm.id ? 'PUT' : 'POST', teamForm.id ? '/api/admin/team/update' : '/api/admin/team/create', teamForm);
+      if (ok(r, '保存成功')) { teamDialog.value = false; loadTeams(); }
+    }
+    async function deleteTeam(id) { if (ok(await api('DELETE', '/api/admin/team/delete/' + id))) loadTeams(); }
+
+    // ── Users ──
+    const userList = ref([]), userSearch = ref('');
+    async function loadUsers() { const r = await api('GET', '/api/admin/user/list?keyword=' + encodeURIComponent(userSearch.value)); if (r.code === 200) userList.value = r.data.list; }
+    const userDialog = ref(false);
+    const userForm = reactive({ id: null, username: '', password: '', role: 'member', team_id: null, status: 1 });
+    function onRoleChange() { if (userForm.role === 'super_admin') userForm.team_id = null; }
+    function showAddUser() { Object.assign(userForm, { id: null, username: '', password: '', role: 'member', team_id: isSuper.value ? null : me.team_id, status: 1 }); if (isSuper.value) loadTeams(); userDialog.value = true; }
+    function editUser(row) { Object.assign(userForm, { id: row.id, username: row.username, password: '', role: row.role, team_id: row.team_id, status: row.status }); if (isSuper.value) loadTeams(); userDialog.value = true; }
+    async function saveUser() {
+      const r = await api(userForm.id ? 'PUT' : 'POST', userForm.id ? '/api/admin/user/update' : '/api/admin/user/create', userForm);
+      if (ok(r, '保存成功')) { userDialog.value = false; loadUsers(); }
+    }
+    async function resetUserPwd(row) {
+      const { value } = await ElMessageBox.prompt('输入新密码', '重置密码 - ' + row.username, { inputType: 'password' });
+      if (ok(await api('POST', '/api/admin/user/reset-password', { id: row.id, newPassword: value }), '已重置')) {}
+    }
+    async function deleteUser(id) { if (ok(await api('DELETE', '/api/admin/user/delete/' + id))) loadUsers(); }
+
+    // ── Profile ──
+    const pwdForm = reactive({ oldPassword: '', newPassword: '' });
+    async function changePwd() {
+      if (ok(await api('POST', '/api/admin/change-password', pwdForm), '密码已修改')) { pwdForm.oldPassword = ''; pwdForm.newPassword = ''; }
+    }
+    async function genApiKey() {
+      await ElMessageBox.confirm('生成/重置后旧 Key 立即失效，确定？', '提示', { type: 'warning' });
+      const r = await api('POST', '/api/admin/api-key');
+      if (r.code === 200) { showSecret('个人 API Key', r.data.apiKey); me.has_api_key = true; persistMe(); } else ElMessage.error(r.message);
     }
 
-    // Servers
-    const serverList = ref([]);
-    const serverSearch = ref('');
-    const serverDialog = ref(false);
-    const serverSaving = ref(false);
+    // ── Servers ──
+    const serverList = ref([]), serverSearch = ref(''), serverDialog = ref(false), serverSaving = ref(false);
     const serverForm = reactive({ id: null, domain: '', host: '', port: 993, use_ssl: 1, status: 1 });
-
-    async function loadServers() {
-      const r = await api('GET', `/api/admin/mail-server/list?keyword=${serverSearch.value}`);
-      if (r.code === 200) serverList.value = r.data.list;
-    }
-    function showAddServer() {
-      Object.assign(serverForm, { id: null, domain: '', host: '', port: 993, use_ssl: 1, status: 1 });
-      serverDialog.value = true;
-    }
+    async function loadServers() { const r = await api('GET', '/api/admin/mail-server/list?keyword=' + encodeURIComponent(serverSearch.value)); if (r.code === 200) serverList.value = r.data.list; }
+    function showAddServer() { Object.assign(serverForm, { id: null, domain: '', host: '', port: 993, use_ssl: 1, status: 1 }); serverDialog.value = true; }
     function editServer(row) { Object.assign(serverForm, row); serverDialog.value = true; }
     async function saveServer() {
       serverSaving.value = true;
-      try {
-        const method = serverForm.id ? 'PUT' : 'POST';
-        const url = serverForm.id ? '/api/admin/mail-server/update' : '/api/admin/mail-server/create';
-        const r = await api(method, url, serverForm);
-        if (r.code === 200) { serverDialog.value = false; loadServers(); ElementPlus.ElMessage.success('保存成功'); }
-        else ElementPlus.ElMessage.error(r.message);
-      } finally { serverSaving.value = false; }
+      try { const r = await api(serverForm.id ? 'PUT' : 'POST', serverForm.id ? '/api/admin/mail-server/update' : '/api/admin/mail-server/create', serverForm); if (ok(r, '保存成功')) { serverDialog.value = false; loadServers(); } }
+      finally { serverSaving.value = false; }
     }
-    async function deleteServer(id) {
-      await api('DELETE', `/api/admin/mail-server/delete/${id}`);
-      loadServers();
-    }
+    async function deleteServer(id) { if (ok(await api('DELETE', '/api/admin/mail-server/delete/' + id))) loadServers(); }
 
-    // Logs
-    const logList = ref([]);
-    const logTotal = ref(0);
-    const logPage = ref(1);
-    const logSearch = ref('');
-    async function loadLogs() {
-      const r = await api('GET', `/api/admin/logs/email?page=${logPage.value}&pageSize=30&keyword=${logSearch.value}`);
-      if (r.code === 200) { logList.value = r.data.list; logTotal.value = r.data.total; }
-    }
-    async function clearLogs() {
-      await api('POST', '/api/admin/logs/email/clear');
-      loadLogs();
-      ElementPlus.ElMessage.success('日志已清空');
-    }
+    // ── Logs ──
+    const logList = ref([]), logTotal = ref(0), logPage = ref(1), logSearch = ref('');
+    async function loadLogs() { const r = await api('GET', `/api/admin/logs/email?page=${logPage.value}&pageSize=30&keyword=${encodeURIComponent(logSearch.value)}`); if (r.code === 200) { logList.value = r.data.list; logTotal.value = r.data.total; } }
+    async function clearLogs() { if (ok(await api('POST', '/api/admin/logs/email/clear'), '已清空')) loadLogs(); }
 
     watch(page, (p) => {
       if (p === 'dashboard') loadStats();
-      if (p === 'emails') loadEmails();
+      if (p === 'accounts') loadAccounts();
+      if (p === 'teams') loadTeams();
+      if (p === 'users') loadUsers();
       if (p === 'servers') loadServers();
       if (p === 'logs') loadLogs();
     });
-
-    onMounted(() => {
-      if (isLoggedIn.value) loadStats();
-    });
+    onMounted(() => { if (isLoggedIn.value) { loadMe(); loadStats(); } });
 
     return {
-      page, token, adminUser, isLoggedIn,
+      page, go, token, me, isLoggedIn, isSuper, isManager, canManageUsers, roleTag,
+      healthOptions, healthLabel, healthTag,
       loginForm, loginLoading, doLogin, logout,
-      codeForm, codeTypes, codeLoading, codeResult, codeResultType, fetchCode, copyCode, copyText,
+      codeForm, codeTypes, codeLoading, codeResult, codeResultType, fetchCode, fetchFromRow, copyText, ensureAccountsLoaded,
       stats,
-      emailList, emailTotal, emailPage, emailSearch, selectedEmails,
-      emailDialog, emailSaving, emailForm, loadEmails,
-      showAddEmail, editEmail, saveEmail, deleteEmail, deleteSelectedEmails, testEmail,
-      importDialog, importText, importLoading, showImportEmails, doImport,
-      serverList, serverSearch, serverDialog, serverSaving, serverForm,
-      loadServers, showAddServer, editServer, saveServer, deleteServer,
+      accountList, accTotal, accPage, accSearch, accSourceFilter, accHealthFilter, selectedAccounts, loadAccounts,
+      accDialog, accSaving, accForm, showAddAccount, editAccount, saveAccount, deleteAccount, deleteSelectedAccounts, rotateToken, claim, release,
+      statusDialog, statusForm, showStatus, saveStatus,
+      importDialog, importText, importLoading, showImport, doImport,
+      secretDialog,
+      teamList, teamDialog, teamForm, showAddTeam, editTeam, saveTeam, deleteTeam,
+      userList, userSearch, loadUsers, userDialog, userForm, onRoleChange, showAddUser, editUser, saveUser, resetUserPwd, deleteUser,
+      pwdForm, changePwd, genApiKey,
+      serverList, serverSearch, serverDialog, serverSaving, serverForm, loadServers, showAddServer, editServer, saveServer, deleteServer,
       logList, logTotal, logPage, logSearch, loadLogs, clearLogs,
     };
   }
-});
-app.use(ElementPlus);
-app.mount('#app');
+}).use(ElementPlus).mount('#app');
 </script>
 </body>
 </html>

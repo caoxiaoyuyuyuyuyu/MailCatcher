@@ -1,194 +1,168 @@
-# MailCatcher — 邮件接码平台
+# MailCatcher — 账号管理 & 统一接码平台
 
-自建邮件验证码接收服务，通过 IMAP 协议自动获取邮箱中的验证码。
+自建的多租户**账号管理 + 验证码接收**平台。统一管理公司大量 Claude / Codex 等账号，
+并作为统一接码网关：自管邮箱走本地 IMAP，171mail 托管账号自动转发，团队成员在同一处接码。
 
 ## 功能
 
-- **在线接码** — 通过 Token + 类型查询邮箱中最近 10 分钟的验证码
-- **邮箱管理** — 添加/导入/编辑/删除邮箱账号，自动生成查询令牌
-- **服务配置** — 配置不同域名的 IMAP 服务器地址
-- **查询日志** — 记录每次验证码查询的结果
-- **管理后台** — Web UI 管理所有配置
+- **统一接码** — 一个入口 `/api/v1/message`，按账号来源自动分发（本地 IMAP / mail.com / 171mail 转发）
+- **多租户与权限** — 团队 + 三级角色（super_admin / team_admin / member），账号与日志按团队隔离
+- **账号来源（source）** — `self`（自管邮箱，本地取码）/ `forward`（171mail 账号，API 转发取码）
+- **账号状态系统** — 健康状态（正常/异常/封禁/到期/停用）+ 领用占用 + 状态变更审计
+- **安全** — IMAP 密码与上游 token AES-256-GCM 加密存储；查询令牌存 hash、明文仅显示一次；日志脱敏
+- **两种接码方式** — 账号令牌（免认证，适合 Agent）/ 邮箱 + 个人 API Key（直观，适合人工）
+- **管理后台** — Web UI 管理团队、用户、账号、服务、日志
 
 ## 快速开始
 
 ```bash
 cd server
 npm install
-npm start
+ENCRYPTION_KEY=请设置随机密钥 JWT_SECRET=请设置随机密钥 npm start
 ```
 
-服务启动在 `http://localhost:3000`
+服务启动在 `http://localhost:3000`。**生产务必设置 `ENCRYPTION_KEY` 与 `JWT_SECRET`**（缺省会告警且不安全）。
 
 ### 默认管理员
 
-- 用户名: `admin`
-- 密码: `admin123`
+- 用户名 `admin` / 密码 `admin123`，角色 `super_admin`（跨团队）
 
-## CLI 命令行工具
+## 角色与团队
 
-全局可用的命令行工具，适合 Agent 自动化或终端操作。
+| 角色 | 权限 |
+|------|------|
+| `super_admin` | 跨团队管理所有团队 / 用户 / 账号 |
+| `team_admin` | 管理本团队的账号与成员（仅能建普通成员） |
+| `member` | 仅查看 / 接码本团队账号，可领用账号 |
 
-### 安装
+账号归属团队；列表、接码、日志、统计均按团队过滤（super_admin 不受限）。
 
-CLI 已安装到 `/usr/local/bin/mailcatcher`，全局可用。
+## 账号来源
 
-### 核心命令（无需认证）
+| source | 说明 | token | 接码路径 |
+|--------|------|-------|----------|
+| `self` | 自管邮箱（密码加密存） | 系统自动签发 | 本地 IMAP / mail.com Web API |
+| `forward` | 171mail 账号（上游 token 加密存） | 系统自动签发 | 转发到 `b.171mail.com/api/v1/message` |
 
-```bash
-# 获取验证码 — 直接输出 code 到 stdout，适合脚本和 Agent 使用
-mailcatcher code <token> [type]
+> 不论哪种来源，对外都用 **MailCatcher 自己签发的查询令牌**（库内存 hash）；171mail 的上游 token 仅作内部加密凭证。
 
-# 示例
-mailcatcher code 864305e9eb314d05bed1793ebc386a88 claude
-# → https://claude.ai/magic-link#1e87fa39...
-
-# JSON 模式（含完整信息）
-mailcatcher code <token> claude --json
-```
-
-### 管理命令（需要先 login）
+## 接码（两种方式）
 
 ```bash
-# 登录（token 自动保存到 ~/.mailcatcher.json）
-mailcatcher login admin admin123
+# 方式一：账号令牌（无需认证，适合脚本 / Agent）
+GET /api/v1/message?token=YOUR_TOKEN&type=claude
 
-# 查看统计
-mailcatcher stats
-
-# 邮箱管理
-mailcatcher email list
-mailcatcher email add user@mail.com password123
-mailcatcher email delete 1
-mailcatcher email import accounts.txt       # 文件：email----pass----appkey
-echo "a@b.com----pass" | mailcatcher email import -  # stdin
-
-# 服务器配置
-mailcatcher server list
-mailcatcher server add example.com imap.example.com --port 993
-
-# 查询日志
-mailcatcher log list
-mailcatcher log clear
+# 方式二：邮箱 + 身份（登录 JWT 或个人 API Key，适合人工，按团队隔离）
+GET /api/v1/message?email=user@priest.com&type=claude
+  Authorization: Bearer <JWT 或 API Key>
 ```
 
-### 配置
-
-```bash
-mailcatcher config                          # 查看当前配置
-mailcatcher config server http://localhost:3100  # 设置服务器地址
-```
-
-也可通过环境变量覆盖：`MAILCATCHER_SERVER`、`MAILCATCHER_TOKEN`
-
-### 退出码
-
-- `0` — 成功
-- `1` — 错误（认证失败、参数错误等）
-- `2` — 无新验证码（10 分钟内无新邮件）
-
-## 使用流程
-
-### 1. 配置邮件服务器（可选）
-
-系统内置了主流邮箱服务商的 IMAP 配置（Gmail、Outlook、QQ、163 等）。如果需要添加自定义域名，在管理后台 → 服务配置中添加。
-
-### 2. 添加邮箱
-
-管理后台 → 邮箱管理 → 添加邮箱：
-- 邮箱地址和密码（IMAP 密码/应用专用密码）
-- 系统自动生成查询令牌（Token）
-
-支持批量导入，格式：`邮箱----密码----应用密钥`（每行一个）
-
-### 3. 获取验证码
-
-**Web 界面**: 访问首页，输入令牌和项目类型，点击获取
-
-**API 调用**:
-```
-GET /api/v1/message?token=YOUR_TOKEN&type=gpt
-```
-
-支持的类型：`gpt` / `claude` / `google` / `telegram` / `grok` / `all`
+支持的类型：`gpt` / `claude` / `google` / `telegram` / `grok` / `chipper` / `all`。
 
 返回示例：
 ```json
-{
-  "code": 200,
-  "message": "success",
-  "data": {
-    "code": "123456",
-    "subject": "Your verification code",
-    "body": "...",
-    "from": "noreply@openai.com",
-    "date": "2026-06-06T10:00:00.000Z"
-  }
-}
+{ "code":200, "message":"success",
+  "data":{ "code":"https://claude.ai/magic-link#...", "subject":"...", "from":"...", "date":"..." } }
 ```
+
+## CLI 命令行工具
+
+全局命令 `/usr/local/bin/mailcatcher`，适合 Agent 自动化或终端操作。
+
+```bash
+# 接码（两种）
+mailcatcher code <token> claude            # 按令牌（免认证）
+mailcatcher apikey                         # 先生成个人 API Key，然后：
+mailcatcher code user@priest.com claude    # 按邮箱
+
+# 管理（需 login）
+mailcatcher login admin admin123
+mailcatcher email add user@mail.com mypass                              # self
+mailcatcher email add x@priest.com --source forward --forward-token <t> # forward
+mailcatcher email list / status <id> <state> / rotate <id> / delete <id>
+mailcatcher email import accounts.txt          # 文件：email----pass----appkey
+mailcatcher team list / user list / server list / log list / stats
+```
+
+配置存储在 `~/.mailcatcher.json`，支持 `MAILCATCHER_SERVER` / `MAILCATCHER_TOKEN` / `MAILCATCHER_API_KEY` 环境变量。
+
+退出码：`0` 成功 / `1` 错误 / `2` 无新验证码。
+
+## 使用流程
+
+1. **建团队、建用户**（super_admin）：团队管理 → 新建团队；用户管理 → 新建用户并分配角色/团队。
+2. **添加账号**：账号管理 → 添加账号，选来源 self/forward；创建后**一次性**显示查询令牌。
+3. **接码**：网页登录后「在线接码」按邮箱选账号取码；或脚本用令牌/API Key 取码。
 
 ## API 文档
 
-### 公开接口
+### 公开 / 接码
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/v1/message?token=&type=` | 获取验证码 |
+| GET | `/api/v1/message?token=&type=` | 按令牌接码（免认证） |
+| GET | `/api/v1/message?email=&type=` | 按邮箱接码（需 Bearer：JWT 或 API Key） |
 
-### 管理接口（需要 Bearer Token）
+### 认证
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/api/admin/login` | 管理员登录 |
-| GET | `/api/admin/email/list` | 邮箱列表 |
-| POST | `/api/admin/email/create` | 添加邮箱 |
-| PUT | `/api/admin/email/update` | 编辑邮箱 |
-| DELETE | `/api/admin/email/delete/:id` | 删除邮箱 |
-| POST | `/api/admin/email/import` | 批量导入 |
-| POST | `/api/admin/email/test-connection` | 测试 IMAP 连接 |
-| GET | `/api/admin/mail-server/list` | 服务器列表 |
-| POST | `/api/admin/mail-server/create` | 添加服务器 |
-| PUT | `/api/admin/mail-server/update` | 编辑服务器 |
-| DELETE | `/api/admin/mail-server/delete/:id` | 删除服务器 |
-| GET | `/api/admin/logs/email` | 查询日志 |
-| POST | `/api/admin/logs/email/clear` | 清空日志 |
-| GET | `/api/admin/stats` | 统计数据 |
+| POST | `/api/admin/login` | 登录 |
+| GET | `/api/admin/me` | 当前用户信息 |
+| POST | `/api/admin/change-password` | 改密 |
+| POST | `/api/admin/api-key` | 生成个人 API Key（仅显示一次） |
+
+### 团队 / 用户（RBAC）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET/POST/PUT/DELETE | `/api/admin/team/*` | 团队管理（super_admin） |
+| GET/POST/PUT/DELETE | `/api/admin/user/*` | 用户管理（super_admin / team_admin） |
+
+### 账号
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/admin/email/list` | 账号列表（团队隔离，令牌掩码） |
+| POST | `/api/admin/email/create` | 添加账号（self/forward，返回一次性令牌） |
+| PUT | `/api/admin/email/update` | 编辑账号 |
+| POST | `/api/admin/email/set-status` | 变更健康状态（审计） |
+| POST | `/api/admin/email/assign` | 领用 / 释放 |
+| POST | `/api/admin/email/rotate-token` | 轮换查询令牌 |
+| POST | `/api/admin/email/import` | 批量导入（self） |
+| DELETE | `/api/admin/email/delete/:id` | 删除 |
+| GET | `/api/admin/logs/email` | 查询日志（团队隔离） |
+| GET | `/api/admin/stats` | 统计（团队隔离） |
 
 ## 技术栈
 
-- **后端**: Node.js + Express + better-sqlite3 + imapflow
-- **前端**: Vue 3 + Element Plus (CDN 模式)
-- **数据库**: SQLite
+- **后端**: Node.js + Express + better-sqlite3 + imapflow + playwright-core
+- **前端**: Vue 3 + Element Plus (CDN 模式，单 HTML 文件)
+- **数据库**: SQLite（多租户 + 账号来源 + 状态系统）
+- **测试**: `npm test`（内置 mock 171mail）
 
 ## 项目结构
 
 ```
-cli/
-└── mailcatcher              # CLI 工具（全局 /usr/local/bin/mailcatcher）
-server/
-├── package.json
-├── data/                    # SQLite 数据库（自动创建）
-├── public/
-│   └── index.html           # 前端页面
-└── src/
-    ├── index.js             # Express 入口
-    ├── db.js                # 数据库初始化
-    ├── middleware/
-    │   └── auth.js          # JWT 认证
-    ├── routes/
-    │   ├── auth.js          # 登录/改密
-    │   ├── emails.js        # 邮箱管理
-    │   ├── mailServers.js   # 服务器管理
-    │   ├── message.js       # 验证码查询（核心）
-    │   └── logs.js          # 日志管理
-    └── services/
-        ├── imap.js          # IMAP 连接与验证码提取
-        └── mailcom.js       # mail.com Web API 抓取
+cli/mailcatcher                 # CLI 工具
+server/src/
+├── index.js                    # Express 入口
+├── db.js                       # SQLite schema（teams/users/emails/account_status_logs/email_logs）
+├── middleware/auth.js          # JWT + requireRole + teamScope + resolvePrincipal
+├── routes/                     # auth / teams / users / emails(账号) / mailServers / message / logs / claude
+└── services/
+    ├── imap.js                 # 本地 IMAP/mailcom 取码（self）
+    ├── mailcom.js              # mail.com Web API
+    ├── forward171.js           # 171mail 转发适配器（forward）
+    └── crypto.js               # AES-256-GCM 加解密 + token hash
+server/test/run-tests.mjs       # 集成测试
+server/public/index.html        # 完整前端 UI
 ```
 
 ## 注意事项
 
-- **应用专用密码**: Gmail/Outlook 等需要使用应用专用密码而非登录密码
-- **IMAP 访问**: 某些邮箱需要手动开启 IMAP 功能
-- **10 分钟窗口**: 只查询最近 10 分钟的邮件，超时无效
-- **生产部署**: 请修改 `JWT_SECRET` 环境变量和管理员密码
+- **环境变量**: 生产必须设置 `ENCRYPTION_KEY`、`JWT_SECRET`；可选 `MAILCATCHER_DATA_DIR`、`FORWARD_171_BASE`
+- **令牌一次性**: 查询令牌 / API Key 创建或轮换时明文仅显示一次，库内只存 hash
+- **应用专用密码**: Gmail/Outlook 等 self 账号需使用应用专用密码
+- **10 分钟窗口**: 本地 IMAP 只查询最近 10 分钟邮件
+- **171mail 上游**: 偶有抖动，转发适配器已内置重试与"无邮件"归一化

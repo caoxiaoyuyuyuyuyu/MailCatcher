@@ -26,6 +26,10 @@ function getAdminToken(flags) {
   return flags.token || process.env.MAILCATCHER_TOKEN || loadConfig().adminToken;
 }
 
+function getApiKey(flags) {
+  return flags.apikey || process.env.MAILCATCHER_API_KEY || loadConfig().apiKey;
+}
+
 // ── HTTP helpers ────────────────────────────────────────
 
 async function api(server, method, path, body, adminToken) {
@@ -81,12 +85,21 @@ function table(rows, columns) {
 // ── Commands ────────────────────────────────────────────
 
 async function cmdCode(args, flags) {
-  const token = args[0];
+  const target = args[0];
   const type = args[1] || 'all';
-  if (!token) die('Usage: mailcatcher code <token> [type]\nTypes: gpt, claude, google, telegram, grok, all');
+  if (!target) die('Usage: mailcatcher code <token|email> [type]\nTypes: gpt, claude, google, telegram, grok, all');
 
   const server = getServer(flags);
-  const r = await api(server, 'GET', `/api/v1/message?token=${encodeURIComponent(token)}&type=${encodeURIComponent(type)}`);
+  let r;
+  if (target.includes('@')) {
+    // 邮箱方式：需要个人 API Key（或登录 token）
+    const cred = getApiKey(flags) || getAdminToken(flags);
+    if (!cred) die('Email mode needs an API key. Run: mailcatcher apikey   (or set MAILCATCHER_API_KEY)');
+    r = await api(server, 'GET', `/api/v1/message?email=${encodeURIComponent(target)}&type=${encodeURIComponent(type)}`, null, cred);
+  } else {
+    // 令牌方式：无需认证
+    r = await api(server, 'GET', `/api/v1/message?token=${encodeURIComponent(target)}&type=${encodeURIComponent(type)}`);
+  }
 
   if (flags.json) { out(r, true); return; }
 
@@ -145,29 +158,33 @@ async function cmdEmailList(args, flags) {
   console.log(`Total: ${r.data.total}`);
   table(r.data.list, [
     { key: 'id', label: 'ID', max: 5 },
-    { key: 'address', label: 'Email', max: 35 },
-    { key: 'password', label: 'Password', max: 20 },
-    { key: 'token', label: 'Token', max: 34 },
-    { key: 'status', label: 'Status', max: 8 },
+    { key: 'address', label: 'Email', max: 32 },
+    { key: 'source', label: 'Source', max: 8 },
+    { key: 'token_prefix', label: 'Token', max: 16 },
+    { key: 'health_status', label: 'Health', max: 9 },
+    { key: 'assignee_name', label: 'Assignee', max: 12 },
+    { key: 'status', label: 'On', max: 3 },
   ]);
 }
 
 async function cmdEmailAdd(args, flags) {
   const address = args[0];
-  const password = args[1];
-  if (!address) die('Usage: mailcatcher email add <address> <password> [--appkey <key>]');
+  if (!address) die('Usage: mailcatcher email add <address> [password] [--source self|forward] [--forward-token <t>] [--appkey <k>]');
 
   const server = getServer(flags);
   const adminToken = getAdminToken(flags);
   if (!adminToken) die('Not logged in. Run: mailcatcher login <user> <pass>');
 
-  const body = { address, password: password || '', appkey: flags.appkey || '', status: 1 };
+  const source = flags.source || 'self';
+  const body = source === 'forward'
+    ? { address, source, forward_provider: flags.provider || '171mail', forward_token: flags['forward-token'] || args[1] || '' }
+    : { address, source, password: args[1] || '', appkey: flags.appkey || '' };
   const r = await api(server, 'POST', '/api/admin/email/create', body, adminToken);
   if (r.code !== 200) die(r.message || 'Failed to add email');
   if (flags.json) { out(r.data, true); return; }
 
-  console.log(`Added: ${address}`);
-  console.log(`Token: ${r.data.token}`);
+  console.log(`Added: ${address} (${source})`);
+  console.log(`Token (shown once): ${r.data.token}`);
 }
 
 async function cmdEmailDelete(args, flags) {
@@ -204,7 +221,79 @@ async function cmdEmailImport(args, flags) {
   const r = await api(server, 'POST', '/api/admin/email/import', { emails: lines }, adminToken);
   if (r.code !== 200) die(r.message || 'Import failed');
   if (flags.json) { out(r, true); return; }
-  console.log(r.message || `Imported ${lines.length} emails`);
+  console.log(`Imported ${r.data.imported} accounts. Tokens (shown once):`);
+  table(r.data.tokens || [], [
+    { key: 'address', label: 'Email', max: 35 },
+    { key: 'token', label: 'Token', max: 34 },
+  ]);
+}
+
+async function cmdApiKey(args, flags) {
+  const server = getServer(flags);
+  const adminToken = getAdminToken(flags);
+  if (!adminToken) die('Not logged in. Run: mailcatcher login <user> <pass>');
+  const r = await api(server, 'POST', '/api/admin/api-key', {}, adminToken);
+  if (r.code !== 200) die(r.message || 'Failed');
+  saveConfig({ apiKey: r.data.apiKey });
+  if (flags.json) { out(r.data, true); return; }
+  console.log(`API key generated and saved to ${CONFIG_PATH}`);
+  console.log(`Key: ${r.data.apiKey}`);
+  console.log('Now you can fetch by email: mailcatcher code <email> claude');
+}
+
+async function cmdEmailStatus(args, flags) {
+  const id = args[0];
+  const health = args[1];
+  if (!id || !health) die('Usage: mailcatcher email status <id> <active|error|banned|expired|disabled> [reason]');
+  const server = getServer(flags);
+  const adminToken = getAdminToken(flags);
+  if (!adminToken) die('Not logged in. Run: mailcatcher login <user> <pass>');
+  const r = await api(server, 'POST', '/api/admin/email/set-status', { id: Number(id), health_status: health, reason: args[2] || '' }, adminToken);
+  if (r.code !== 200) die(r.message || 'Failed');
+  console.log(`Account #${id} → ${health}`);
+}
+
+async function cmdEmailRotate(args, flags) {
+  const id = args[0];
+  if (!id) die('Usage: mailcatcher email rotate <id>');
+  const server = getServer(flags);
+  const adminToken = getAdminToken(flags);
+  if (!adminToken) die('Not logged in. Run: mailcatcher login <user> <pass>');
+  const r = await api(server, 'POST', '/api/admin/email/rotate-token', { id: Number(id) }, adminToken);
+  if (r.code !== 200) die(r.message || 'Failed');
+  if (flags.json) { out(r.data, true); return; }
+  console.log(`New token (shown once): ${r.data.token}`);
+}
+
+async function cmdTeamList(args, flags) {
+  const server = getServer(flags);
+  const adminToken = getAdminToken(flags);
+  if (!adminToken) die('Not logged in. Run: mailcatcher login <user> <pass>');
+  const r = await api(server, 'GET', '/api/admin/team/list', null, adminToken);
+  if (r.code !== 200) die(r.message || 'Failed');
+  if (flags.json) { out(r.data, true); return; }
+  table(r.data.list, [
+    { key: 'id', label: 'ID', max: 5 },
+    { key: 'name', label: 'Team', max: 20 },
+    { key: 'member_count', label: 'Members', max: 8 },
+    { key: 'account_count', label: 'Accounts', max: 9 },
+  ]);
+}
+
+async function cmdUserList(args, flags) {
+  const server = getServer(flags);
+  const adminToken = getAdminToken(flags);
+  if (!adminToken) die('Not logged in. Run: mailcatcher login <user> <pass>');
+  const r = await api(server, 'GET', '/api/admin/user/list', null, adminToken);
+  if (r.code !== 200) die(r.message || 'Failed');
+  if (flags.json) { out(r.data, true); return; }
+  table(r.data.list, [
+    { key: 'id', label: 'ID', max: 5 },
+    { key: 'username', label: 'User', max: 18 },
+    { key: 'role', label: 'Role', max: 12 },
+    { key: 'team_name', label: 'Team', max: 16 },
+    { key: 'status', label: 'On', max: 3 },
+  ]);
 }
 
 async function cmdEmailTest(args, flags) {
@@ -347,48 +436,52 @@ function parseArgs(argv) {
 // ── Help ────────────────────────────────────────────────
 
 function showHelp() {
-  console.log(`mailcatcher — CLI for MailCatcher verification code platform
+  console.log(`mailcatcher — CLI for MailCatcher account & verification-code platform
 
 USAGE
   mailcatcher <command> [args] [options]
 
-CORE (no auth required)
-  code <token> [type]         Fetch verification code / magic link
+FETCH CODE
+  code <token> [type]         By account token (no auth)
+  code <email> [type]         By email (needs personal API key, run 'apikey' first)
                               Types: gpt, claude, google, telegram, grok, all
-                              Prints the code to stdout on success (exit 0)
-                              Exit 2 if no new message, exit 1 on error
+                              Prints code/link to stdout (exit 0); exit 2 if none
 
 ADMIN (requires login)
   login <user> <pass>         Authenticate and save token
+  apikey                      Generate personal API key (for 'code <email>')
   stats                       Show dashboard statistics
   config [server <url>]       View/set server URL
 
-  email list [--search <kw>]  List email accounts
-  email add <addr> <pass>     Add email account (prints token)
-  email delete <id>           Delete email account
-  email import <file|->       Batch import (email----pass----appkey)
-  email test <addr> <pass>    Test IMAP/Web connection
+  email list [--search <kw>]              List accounts (token shown masked)
+  email add <addr> [pass]                 Add self account [--appkey <k>]
+  email add <addr> --source forward --forward-token <t>   Add 171mail account
+  email status <id> <state> [reason]      Set health (active/error/banned/expired/disabled)
+  email rotate <id>                       Rotate query token
+  email delete <id>                       Delete account
+  email import <file|->                   Batch import self accounts (email----pass----appkey)
+  email test <addr> <pass>                Test IMAP connection
 
-  server list                 List IMAP server configs
-  server add <domain> <host>  Add server config [--port N] [--no-ssl]
-  server delete <id>          Delete server config
-
-  log list [--search <kw>]    View query logs
-  log clear                   Clear all logs
+  team list                   List teams (super_admin)
+  user list                   List users (admin)
+  server list / add / delete  IMAP server configs
+  log list / clear            Query logs
 
 OPTIONS
   --server <url>    Override server URL (or MAILCATCHER_SERVER env)
   --token <token>   Override admin token (or MAILCATCHER_TOKEN env)
+  --apikey <key>    Personal API key for email mode (or MAILCATCHER_API_KEY env)
   --json            Output raw JSON
   --page <n>        Page number for list commands
 
 EXAMPLES
-  mailcatcher code abc123def claude
+  mailcatcher code abc123def claude            # by token
   mailcatcher login admin admin123
-  mailcatcher email list
-  mailcatcher email add user@mail.com mypass
-  mailcatcher email import accounts.txt
-  echo "a@b.com----pass" | mailcatcher email import -`);
+  mailcatcher apikey                           # then:
+  mailcatcher code user@priest.com claude      # by email
+  mailcatcher email add u@mail.com mypass
+  mailcatcher email add x@priest.com --source forward --forward-token c6db...
+  mailcatcher email status 5 banned "compromised"`);
 }
 
 // ── Router ──────────────────────────────────────────────
@@ -404,6 +497,7 @@ async function main() {
   const routes = {
     'code':           () => cmdCode(args.slice(1), flags),
     'login':          () => cmdLogin(args.slice(1), flags),
+    'apikey':         () => cmdApiKey(args.slice(1), flags),
     'config':         () => cmdConfig(args.slice(1), flags),
     'stats':          () => cmdStats([], flags),
     'email.list':     () => cmdEmailList(rest, flags),
@@ -411,6 +505,10 @@ async function main() {
     'email.delete':   () => cmdEmailDelete(rest, flags),
     'email.import':   () => cmdEmailImport(rest, flags),
     'email.test':     () => cmdEmailTest(rest, flags),
+    'email.status':   () => cmdEmailStatus(rest, flags),
+    'email.rotate':   () => cmdEmailRotate(rest, flags),
+    'team.list':      () => cmdTeamList(rest, flags),
+    'user.list':      () => cmdUserList(rest, flags),
     'server.list':    () => cmdServerList(rest, flags),
     'server.add':     () => cmdServerAdd(rest, flags),
     'server.delete':  () => cmdServerDelete(rest, flags),
@@ -421,7 +519,7 @@ async function main() {
   const compoundKey = sub ? `${cmd}.${sub}` : null;
   const handler = (compoundKey && routes[compoundKey]) || routes[cmd];
   if (!handler) {
-    if (cmd === 'email' || cmd === 'server' || cmd === 'log') {
+    if (['email', 'server', 'log', 'team', 'user'].includes(cmd)) {
       die(`Unknown subcommand: ${cmd} ${sub || ''}\nRun: mailcatcher help`);
     }
     die(`Unknown command: ${cmd}\nRun: mailcatcher help`);
