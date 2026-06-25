@@ -1,10 +1,13 @@
 import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'mailcatcher-secret-key-change-in-production';
+if (!process.env.JWT_SECRET) {
+  console.warn('[auth] ⚠ 未设置 JWT_SECRET，使用默认值。生产环境务必设置！');
+}
 
 export function generateToken(user) {
   return jwt.sign(
-    { id: user.id, username: user.username, role: user.role },
+    { id: user.id, username: user.username, role: user.role, team_id: user.team_id ?? null },
     JWT_SECRET,
     { expiresIn: '7d' }
   );
@@ -21,4 +24,23 @@ export function authMiddleware(req, res, next) {
   } catch {
     return res.status(401).json({ code: 401, message: '登录已过期' });
   }
+}
+
+// 角色门禁：requireRole('super_admin') / requireRole('super_admin','team_admin')
+export function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!req.user || !roles.includes(req.user.role)) {
+      return res.status(403).json({ code: 403, message: '权限不足' });
+    }
+    next();
+  };
+}
+
+export const isSuper = (req) => req.user?.role === 'super_admin';
+
+// 团队隔离辅助：super_admin 不受限；其余仅限本团队。
+// 返回 { clause, params }，用于拼接到 WHERE 后（clause 形如 "AND team_id = ?"）。
+export function teamScope(req, column = 'team_id') {
+  if (isSuper(req)) return { clause: '', params: [] };
+  return { clause: ` AND ${column} = ?`, params: [req.user.team_id ?? -1] };
 }

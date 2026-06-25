@@ -8,11 +8,17 @@
 //   - 其余                                         → 硬错误，抛出
 
 const BASE = process.env.FORWARD_171_BASE || 'https://b.171mail.com';
-const TIMEOUT_MS = 20000;
-const MAX_ATTEMPTS = 2; // 1 次重试，平滑上游间歇性抖动
+const TIMEOUT_MS = 15000;
+const MAX_ATTEMPTS = 4; // 上游抖动概率较高，多次重试压低失败率
+const BACKOFF_MS = 600;
 
+// 无新邮件（先于 transient 判定，避免被当作错误重试）
 const EMPTY_RE = /收件箱为空|未匹配到邮件|no new message/i;
-const TRANSIENT_RE = /网络或代理|请求失败|timeout|aborted|超时/i;
+// 171mail 把所有"临时故障"都包成「获取邮件失败: ...」（网络/代理/未能提取配置/请稍后重试 等），
+// 这类一律重试；硬错误（如「邮箱服务器未配置」）不带此前缀，直接抛出。
+const TRANSIENT_RE = /获取邮件失败|网络或代理|请稍后重试|timeout|aborted|超时/i;
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 export async function fetchVia171(forwardToken, type) {
   if (!forwardToken) throw new Error('该账号未配置 171mail 转发令牌');
@@ -28,7 +34,7 @@ export async function fetchVia171(forwardToken, type) {
     } catch (err) {
       // 网络层错误（超时/连接失败/非 JSON）→ 重试
       lastErr = new Error(`171mail 转发请求失败: ${err.message}`);
-      if (attempt < MAX_ATTEMPTS) continue;
+      if (attempt < MAX_ATTEMPTS) { await sleep(BACKOFF_MS); continue; }
       throw lastErr;
     }
 
@@ -48,7 +54,7 @@ export async function fetchVia171(forwardToken, type) {
 
     if (TRANSIENT_RE.test(msg)) { // 上游抖动 → 重试
       lastErr = new Error(`171mail 上游抖动: ${msg}`);
-      if (attempt < MAX_ATTEMPTS) continue;
+      if (attempt < MAX_ATTEMPTS) { await sleep(BACKOFF_MS); continue; }
       throw lastErr;
     }
 

@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { mkdirSync } from 'fs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = join(__dirname, '..', 'data');
+const DATA_DIR = process.env.MAILCATCHER_DATA_DIR || join(__dirname, '..', 'data');
 mkdirSync(DATA_DIR, { recursive: true });
 
 const db = new Database(join(DATA_DIR, 'mailcatcher.db'));

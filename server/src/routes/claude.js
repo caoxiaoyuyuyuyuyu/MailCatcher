@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import { triggerClaudeLogin } from '../services/claudeLogin.js';
+import { authMiddleware } from '../middleware/auth.js';
 
 const router = Router();
+router.use(authMiddleware); // 触发 Claude 登录属敏感操作，需登录
 
 router.post('/send', async (req, res) => {
   const { email } = req.body;
