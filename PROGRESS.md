@@ -23,3 +23,8 @@
 - **问题**：测试里「种子进程写入」与「server 进程启动」并发，server 偶发读不到刚写的行（首次 401）。
 - **解决**：确保 seed 进程**退出后**再起 server；测试用 `MAILCATCHER_DATA_DIR` 临时库 + 就绪轮询。
 - **避免**：跨进程共享 SQLite 时，注意写入提交与读取连接的先后；测试用独立临时库隔离。
+
+### 5. 删除账号触发外键约束失败（生产 500）（commit 2a78574）
+- **问题**：`email_logs.email_id` 外键引用 `emails(id)` 且 `foreign_keys=ON`。删除**有查询日志的账号**时 `DELETE FROM emails` 触发 `FOREIGN KEY constraint failed` → 500。测试只删了无日志的新账号，漏掉；生产 1913 条日志全引用账号，一删就炸。
+- **解决**：删除走事务——先 `UPDATE email_logs SET email_id=NULL`（保留审计、解除关联）+ 清 `account_status_logs`，再删账号；单删/批删/清空统一。补回归测试（删带日志账号）。
+- **避免**：删除有外键被引用的行前，先处理依赖（置空/级联/先删子表）；测试数据要**覆盖被引用的场景**，不能只测「干净」数据。已上线需 `systemctl restart`（后端改动，非静态文件）。
