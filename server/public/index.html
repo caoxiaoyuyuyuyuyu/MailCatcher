@@ -537,7 +537,7 @@ createApp({
       } catch (e) { codeResult.value = '请求失败: ' + e.message; codeResultType.value = 'error'; }
       finally { codeLoading.value = false; }
     }
-    function fetchFromRow(row) { codeForm.mode = 'email'; codeForm.email = row.address; page.value = 'code'; fetchCode(); }
+    function fetchFromRow(row) { codeForm.mode = 'email'; codeForm.email = row.address; codeResult.value = ''; page.value = 'code'; }
     function copyText(t) { navigator.clipboard.writeText(t); ElMessage.success('已复制'); }
 
     // Codex 一键：触发 OpenAI 发码 → 轮询取码
