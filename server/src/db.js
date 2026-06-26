@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { mkdirSync } from 'fs';
+import { encrypt, hashToken, maskToken } from './services/crypto.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.MAILCATCHER_DATA_DIR || join(__dirname, '..', 'data');
@@ -89,10 +90,6 @@ db.exec(`
     created_at DATETIME DEFAULT (datetime('now')),
     FOREIGN KEY (email_id) REFERENCES emails(id)
   );
-
-  CREATE INDEX IF NOT EXISTS idx_emails_token_hash ON emails(token_hash);
-  CREATE INDEX IF NOT EXISTS idx_emails_team ON emails(team_id);
-  CREATE INDEX IF NOT EXISTS idx_logs_team ON email_logs(team_id);
 `);
 
 // ── 幂等迁移：为已存在的旧库补齐新列 ─────────────────────
@@ -125,6 +122,36 @@ for (const [col, def] of [
   ['team_id', 'INTEGER'],
   ['requested_by', 'INTEGER'],
 ]) addColumnIfMissing('email_logs', col, def);
+
+// 索引：必须在补齐新列之后创建（旧库升级路径下列才存在）
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_emails_token_hash ON emails(token_hash);
+  CREATE INDEX IF NOT EXISTS idx_emails_team ON emails(team_id);
+  CREATE INDEX IF NOT EXISTS idx_logs_team ON email_logs(team_id);
+`);
+
+// ── 一次性回填：把旧版明文 token/password 迁移到 token_hash/password_enc ──
+// 幂等：仅处理新字段为空、且旧列存在且有值的行；让升级前已有账号原样继续可用。
+(function backfillLegacyAccounts() {
+  const cols = db.prepare('PRAGMA table_info(emails)').all().map(c => c.name);
+  const hasLegacyToken = cols.includes('token');
+  const hasLegacyPass = cols.includes('password');
+  if (!hasLegacyToken && !hasLegacyPass) return;
+
+  const sel = `SELECT id, token_hash, password_enc,
+                 ${hasLegacyToken ? 'token' : "'' AS token"},
+                 ${hasLegacyPass ? 'password' : "'' AS password"}
+               FROM emails`;
+  const updTok = db.prepare("UPDATE emails SET token_hash = ?, token_prefix = ? WHERE id = ?");
+  const updPwd = db.prepare("UPDATE emails SET password_enc = ? WHERE id = ?");
+  const tx = db.transaction(() => {
+    for (const r of db.prepare(sel).all()) {
+      if (!r.token_hash && r.token) updTok.run(hashToken(r.token), maskToken(r.token), r.id);
+      if ((!r.password_enc || r.password_enc === '') && r.password) updPwd.run(encrypt(r.password), r.id);
+    }
+  });
+  tx();
+})();
 
 // ── 种子：默认团队 ───────────────────────────────────────
 const hasTeam = db.prepare('SELECT id FROM teams LIMIT 1').get();
