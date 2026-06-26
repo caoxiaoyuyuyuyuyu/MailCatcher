@@ -52,7 +52,7 @@ router.get('/list', (req, res) => {
   const list = db.prepare(
     `SELECT e.id, e.address, e.source, e.appkey, e.token_prefix, e.health_status, e.status,
             e.batch_no, e.fail_count, e.forward_provider, e.fetch_address, e.created_by, e.shared,
-            e.created_at, e.updated_at,
+            e.purchaser, e.invoiced, e.created_at, e.updated_at,
             (e.password_enc != '') AS has_password, (e.forward_token_enc != '') AS has_forward_token,
             u.username AS created_by_name
      FROM emails e LEFT JOIN users u ON e.created_by = u.id
@@ -64,7 +64,7 @@ router.get('/list', (req, res) => {
 
 // ── 创建（任何登录用户：成为 owner，自动获授权）────────────
 router.post('/create', (req, res) => {
-  const { address, source = 'self', appkey, batch_no, password, fetch_address, shared = 0, forward_provider = '171mail', forward_token } = req.body;
+  const { address, source = 'self', appkey, batch_no, password, fetch_address, shared = 0, purchaser, invoiced = 0, forward_provider = '171mail', forward_token } = req.body;
   if (!address) return res.json({ code: 400, message: '邮箱地址不能为空' });
   if (!['self', 'forward'].includes(source)) return res.json({ code: 400, message: '非法来源' });
   if (source === 'forward' && !forward_token) return res.json({ code: 400, message: 'forward 账号必须提供上游 token' });
@@ -72,14 +72,14 @@ router.post('/create', (req, res) => {
   const { token, token_hash, token_prefix } = issueToken();
   try {
     const cols = ['address', 'source', 'appkey', 'batch_no', 'password_enc', 'fetch_address',
-      'forward_provider', 'forward_token_enc', 'token_hash', 'token_prefix', 'created_by', 'shared'];
+      'forward_provider', 'forward_token_enc', 'token_hash', 'token_prefix', 'created_by', 'shared', 'purchaser', 'invoiced'];
     const args = [
       address, source, appkey || '', batch_no || '',
       source === 'self' ? encrypt(password || '') : '',
       source === 'self' ? (fetch_address || '') : '',
       source === 'forward' ? forward_provider : '',
       source === 'forward' ? encrypt(forward_token) : '',
-      token_hash, token_prefix, req.user.id, shared ? 1 : 0,
+      token_hash, token_prefix, req.user.id, shared ? 1 : 0, purchaser || '', invoiced ? 1 : 0,
     ];
     if (HAS_LEGACY_TOKEN) { cols.push('token'); args.push(token_hash); }
     const ph = args.map(() => '?').join(', ');
@@ -94,7 +94,7 @@ router.post('/create', (req, res) => {
 
 // ── 更新（owner 或 admin）────────────────────────────────
 router.put('/update', (req, res) => {
-  const { id, address, appkey, batch_no, status, password, fetch_address, shared, forward_token } = req.body;
+  const { id, address, appkey, batch_no, status, password, fetch_address, shared, purchaser, invoiced, forward_token } = req.body;
   if (!id) return res.json({ code: 400, message: 'id 不能为空' });
   const acc = getAccount(id);
   if (!acc) return res.json({ code: 404, message: '账号不存在' });
@@ -104,10 +104,12 @@ router.put('/update', (req, res) => {
   const newForwardEnc = (acc.source === 'forward' && forward_token) ? encrypt(forward_token) : acc.forward_token_enc;
   const newFetch = acc.source === 'self' ? (fetch_address ?? acc.fetch_address) : acc.fetch_address;
   const newShared = shared === undefined ? acc.shared : (shared ? 1 : 0);
+  const newPurchaser = purchaser === undefined ? acc.purchaser : (purchaser || '');
+  const newInvoiced = invoiced === undefined ? acc.invoiced : (invoiced ? 1 : 0);
   db.prepare(
     `UPDATE emails SET address = ?, appkey = ?, batch_no = ?, status = ?,
-       password_enc = ?, fetch_address = ?, forward_token_enc = ?, shared = ?, updated_at = datetime('now') WHERE id = ?`
-  ).run(address ?? acc.address, appkey ?? acc.appkey, batch_no ?? acc.batch_no, status ?? acc.status, newPasswordEnc, newFetch, newForwardEnc, newShared, id);
+       password_enc = ?, fetch_address = ?, forward_token_enc = ?, shared = ?, purchaser = ?, invoiced = ?, updated_at = datetime('now') WHERE id = ?`
+  ).run(address ?? acc.address, appkey ?? acc.appkey, batch_no ?? acc.batch_no, status ?? acc.status, newPasswordEnc, newFetch, newForwardEnc, newShared, newPurchaser, newInvoiced, id);
   // 改为独占且当前授权多于 1 人时，仅保留最早的一个
   if (!newShared) { const gs = grantsOf(id); if (gs.length > 1) db.prepare('DELETE FROM account_grants WHERE account_id = ? AND user_id != ?').run(id, gs[0].user_id); }
   res.json({ code: 200, message: 'success' });

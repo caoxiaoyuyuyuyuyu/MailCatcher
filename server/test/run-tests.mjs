@@ -79,6 +79,14 @@ try {
   await api('POST', '/api/admin/email/create', { address: 'codex@outlook.com', source: 'self', fetch_address: 'inbox@mail.com', password: 'p' }, ADMIN);
   const fwAcc = (await api('GET', '/api/admin/email/list?keyword=codex@outlook.com', null, ADMIN)).data.list[0];
   ok(fwAcc && fwAcc.address === 'codex@outlook.com' && fwAcc.fetch_address === 'inbox@mail.com', '账号支持「展示邮箱≠收件邮箱」(fetch_address 存取)');
+  // 购买人 / 购买状态(是否已开发票)
+  const buyAcc = await api('POST', '/api/admin/email/create', { address: 'buy@priest.com', source: 'forward', forward_token: 'up', purchaser: '张三', invoiced: 1 }, ADMIN);
+  const buyRow = async () => (await api('GET', '/api/admin/email/list?keyword=buy@priest.com', null, ADMIN)).data.list[0];
+  let br = await buyRow();
+  ok(buyAcc.code === 200 && br.purchaser === '张三' && br.invoiced === 1, '创建时可存购买人 + 已开票状态');
+  await api('PUT', '/api/admin/email/update', { id: br.id, purchaser: '李四', invoiced: 0 }, ADMIN);
+  br = await buyRow();
+  ok(br.purchaser === '李四' && br.invoiced === 0, '更新购买人 + 改回未开票');
 
   console.log('## 成员权限（归属 / 分配）');
   const memberId = (await api('GET', '/api/admin/user/list', null, ADMIN)).data.list.find(u => u.username === 'm1@apexin.ai').id;

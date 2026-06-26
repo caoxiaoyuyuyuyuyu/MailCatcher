@@ -187,6 +187,12 @@
         <el-table-column label="分配给" min-width="130" show-overflow-tooltip>
           <template #default="{row}"><span v-if="row.grantees && row.grantees.length">{{ row.grantees.map(g=>g.username).join('、') }}</span><span v-else class="hint">未分配</span></template>
         </el-table-column>
+        <el-table-column label="购买人" width="110" show-overflow-tooltip>
+          <template #default="{row}"><span v-if="row.purchaser">{{ row.purchaser }}</span><span v-else class="hint">—</span></template>
+        </el-table-column>
+        <el-table-column label="购买状态" width="100" align="center">
+          <template #default="{row}"><el-tag size="small" :type="row.invoiced?'success':'warning'">{{ row.invoiced?'已开票':'未开票' }}</el-tag></template>
+        </el-table-column>
         <el-table-column label="启用" width="60" align="center">
           <template #default="{row}"><el-tag size="small" :type="row.status===1?'success':'info'">{{ row.status===1?'是':'否' }}</el-tag></template>
         </el-table-column>
@@ -326,6 +332,10 @@
       <el-form-item label="可多人共用">
         <el-switch v-model="accForm.shared" :active-value="1" :inactive-value="0"></el-switch>
         <span class="hint" style="margin-left:8px">开=共享(如 Codex，可分配给多人)；关=独占(如 Claude，单人)</span>
+      </el-form-item>
+      <el-form-item label="购买人"><el-input v-model="accForm.purchaser" placeholder="谁出钱买的号，可选"></el-input></el-form-item>
+      <el-form-item label="购买状态">
+        <el-switch v-model="accForm.invoiced" :active-value="1" :inactive-value="0" active-text="已开票" inactive-text="未开票"></el-switch>
       </el-form-item>
       <el-form-item v-if="accForm.id" label="启用"><el-switch v-model="accForm.status" :active-value="1" :inactive-value="0"></el-switch></el-form-item>
     </el-form>
@@ -559,7 +569,7 @@ createApp({
     const accSearch = ref(''), accSourceFilter = ref(''), accHealthFilter = ref('');
     const selectedAccounts = ref([]);
     const accDialog = ref(false), accSaving = ref(false);
-    const accForm = reactive({ id: null, source: 'self', address: '', password: '', appkey: '', fetch_address: '', forward_provider: '171mail', forward_token: '', shared: 0, status: 1 });
+    const accForm = reactive({ id: null, source: 'self', address: '', password: '', appkey: '', fetch_address: '', forward_provider: '171mail', forward_token: '', shared: 0, purchaser: '', invoiced: 0, status: 1 });
     let accountsLoaded = false;
     async function loadAccounts() {
       const q = `page=${accPage.value}&pageSize=30&keyword=${encodeURIComponent(accSearch.value)}&source=${accSourceFilter.value}&health=${accHealthFilter.value}`;
@@ -568,11 +578,11 @@ createApp({
     }
     function ensureAccountsLoaded() { if (!accountsLoaded && isLoggedIn.value) loadAccounts(); }
     function showAddAccount() {
-      Object.assign(accForm, { id: null, source: 'self', address: '', password: '', appkey: '', fetch_address: '', forward_provider: '171mail', forward_token: '', shared: 0, status: 1 });
+      Object.assign(accForm, { id: null, source: 'self', address: '', password: '', appkey: '', fetch_address: '', forward_provider: '171mail', forward_token: '', shared: 0, purchaser: '', invoiced: 0, status: 1 });
       accDialog.value = true;
     }
     function editAccount(row) {
-      Object.assign(accForm, { id: row.id, source: row.source, address: row.address, password: '', appkey: row.appkey, fetch_address: row.fetch_address || '', forward_provider: row.forward_provider || '171mail', forward_token: '', shared: row.shared ? 1 : 0, status: row.status });
+      Object.assign(accForm, { id: row.id, source: row.source, address: row.address, password: '', appkey: row.appkey, fetch_address: row.fetch_address || '', forward_provider: row.forward_provider || '171mail', forward_token: '', shared: row.shared ? 1 : 0, purchaser: row.purchaser || '', invoiced: row.invoiced ? 1 : 0, status: row.status });
       accDialog.value = true;
     }
     async function saveAccount() {

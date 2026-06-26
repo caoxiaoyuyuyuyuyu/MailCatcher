@@ -119,6 +119,8 @@ for (const [col, def] of [
   ['fail_count', 'INTEGER DEFAULT 0'],
   ['created_by', 'INTEGER'],            // 添加人(归属)；NULL=历史账号(仅 admin 可见)
   ['shared', 'INTEGER DEFAULT 0'],      // 0=独占(Claude,单人) 1=共享(Codex,可多人)
+  ['purchaser', "TEXT DEFAULT ''"],     // 购买人(谁出钱买的号)
+  ['invoiced', 'INTEGER DEFAULT 0'],    // 购买状态：0=未开发票 1=已开发票
 ]) addColumnIfMissing('emails', col, def);
 
 for (const [col, def] of [

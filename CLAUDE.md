@@ -86,6 +86,7 @@ MailCatcher 已从「纯接码工具」演进为「**多租户账号管理 + 统
 - **前端**: Vue 3 + Element Plus (CDN 模式，单 HTML 文件)
 - **单团队 + 两级角色**: 一个服务一个团队；users 仅 `admin` / `member`。账号**按归属隔离**：任何登录用户都能自助添加账号（成为 `created_by` 归属人），只看到「自己添加的 + 被分配给自己的」；admin 看全部、管用户。管理员可升降级他人
 - **账号归属/分配**: 每个账号有归属人 `created_by` 和共享标志 `shared`(0=独占,如 Claude 单人；1=共享,如 Codex 多人)。归属人或 admin 可把账号**分配**给其他用户(`account_grants` 表，独占账号再分配会替换原有单人，共享账号可多人)。能「使用」(浏览/取码)= admin/owner/被授予；能「管理」(改删/轮换/状态/分配)= admin/owner
+- **采购信息**: 每个账号可记 `purchaser`(购买人) 与 `invoiced`(购买状态：0=未开发票 1=已开发票)，在创建/编辑账号时填，列表展示；owner 或 admin 可改
 - **账号来源(source)**:
   - `self` — 自管邮箱，本地 IMAP/mailcom 取码（密码 AES-GCM 加密存）；可设 `fetch_address`(实际收件邮箱)与展示 `address` 分离——如 Codex 用 Outlook 订阅(展示)、验证码转发到公司 mail.com(收件)，取码时按转发邮件正文里的 `To:<原 Outlook>` 过滤区分
   - `forward` — 171mail 账号，转发到 `b.171mail.com/api/v1/message`（上游 token 加密存）
@@ -107,7 +108,7 @@ MailCatcher 已从「纯接码工具」演进为「**多租户账号管理 + 统
 - `server/src/middleware/auth.js` — JWT + requireRole(admin/member) + resolvePrincipal
 - `server/src/routes/message.js` — 接码 API (`/api/v1/message`)，按 source 分发本地/转发
 - `server/src/services/codexLogin.js` + `routes/codex.js` — 触发 OpenAI/Codex 邮箱 OTP 登录发码（`POST /api/v1/codex/send`）
-- `server/src/routes/emails.js` — 账号 CRUD（source/状态机/归属/分配 grant·revoke/token 轮换；列表按归属过滤，增删改/分配限 owner 或 admin）
+- `server/src/routes/emails.js` — 账号 CRUD（source/状态机/归属/分配 grant·revoke/token 轮换/购买人 `purchaser`+发票状态 `invoiced`；列表按归属过滤，增删改/分配限 owner 或 admin）
 - `server/src/routes/users.js` — 用户管理（admin 升降级/重置/删除；防自锁）；`GET /options`(任何登录用户) 供分配下拉用
 - `server/src/routes/mailServers.js` — IMAP 服务器配置
 - `server/src/db.js` — SQLite schema（账号来源 + 状态系统）
