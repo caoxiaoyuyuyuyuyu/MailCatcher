@@ -91,14 +91,17 @@ curl -X POST http://localhost:3000/api/admin/api-key -H "Authorization: Bearer $
 # → { data:{ apiKey } }（仅此一次）；之后可用 apiKey 按邮箱接码
 ```
 
-### 6. 状态机 / 领用 / 轮换
+### 6. 状态机 / 分配 / 轮换
 
 ```bash
 curl -X POST http://localhost:3000/api/admin/email/set-status \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"id":1,"health_status":"banned","reason":"被封"}'      # 记入审计
-curl -X POST http://localhost:3000/api/admin/email/assign \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"id":1,"assignee_id":3}'
+# 分配账号给用户(owner 或 admin)：独占号替换单人，共享号(shared=1)可多人
+curl -X POST http://localhost:3000/api/admin/email/grant \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"id":1,"user_id":3}'
+curl -X POST http://localhost:3000/api/admin/email/revoke \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"id":1,"user_id":3}'
 curl -X POST http://localhost:3000/api/admin/email/rotate-token \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"id":1}'
 ```
@@ -119,6 +122,6 @@ mailcatcher email status 1 banned / email rotate 1
 
 1. 打开 http://localhost:3000 → 「在线接码」：登录后可"按邮箱"选账号取码；或"按令牌"。
 2. 「管理登录」admin / admin123。
-3. 账号管理：来源(self/forward)切换、状态变更、领用/释放、token 轮换、批量导入(self)。
+3. 账号管理：来源(self/forward)切换、独占/共享(shared)切换、状态变更、分配/收回(grant/revoke)、token 轮换、批量导入(self)。
 4. 用户管理（admin：升降级角色/重置密码/删除）、个人(API Key/改密)、服务配置、查询日志。
-5. 验证角色：member 登录后只见「在线接码 + 账号管理」，账号页无增删改按钮，不能访问用户/日志接口。
+5. 验证归属：member 登录后只见「在线接码 + 账号管理」，账号页只看到「自己添加 + 被分配给自己」的账号，可对自己的账号增删改/分配，看不到别人的，不能访问用户/日志接口。

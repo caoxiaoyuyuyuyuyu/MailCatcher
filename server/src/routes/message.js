@@ -88,6 +88,10 @@ router.get('/', async (req, res) => {
     if (!principal) return res.json({ code: 401, message: '按邮箱取码需登录或提供 API Key' });
     const account = db.prepare('SELECT * FROM emails WHERE address = ?').get(email);
     if (!account) return res.json({ code: 404, message: '账号不存在' });
+    // 访问控制：admin / 自己添加(owner) / 被分配(grant) 才能取码
+    const canAccess = principal.role === 'admin' || account.created_by === principal.id
+      || db.prepare('SELECT 1 FROM account_grants WHERE account_id = ? AND user_id = ?').get(account.id, principal.id);
+    if (!canAccess) return res.json({ code: 403, message: '无权访问该账号' });
     return runFetch(res, account, type, account.token_prefix || '(email)', principal.id);
   }
 

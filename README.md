@@ -6,10 +6,11 @@
 ## 功能
 
 - **统一接码** — 一个入口 `/api/v1/message`，按账号来源自动分发（本地 IMAP / mail.com / 171mail 转发）
-- **角色与权限** — 单服务一个团队，两级角色（admin / member），账号池全局共享
+- **角色与归属** — 单服务一个团队，两级角色（admin / member）；账号按归属隔离，谁添加谁拥有，可分配给他人共用
 - **自助注册** — 用 `@apexin.ai` 邮箱注册（密码二次确认），注册后即可登录，管理员再升级为 admin
 - **账号来源（source）** — `self`（自管邮箱，本地取码）/ `forward`（171mail 账号，API 转发取码）
-- **账号状态系统** — 健康状态（正常/异常/封禁/到期/停用）+ 领用占用 + 状态变更审计
+- **账号归属/分配** — 每个账号有归属人(谁添加谁拥有) + 独占/共享标志；归属人或 admin 可把账号分配给其他用户（独占号单人、共享号如 Codex 多人）
+- **账号状态系统** — 健康状态（正常/异常/封禁/到期/停用）+ 状态变更审计
 - **安全** — IMAP 密码与上游 token AES-256-GCM 加密存储；查询令牌存 hash、明文仅显示一次；日志脱敏
 - **两种接码方式** — 账号令牌（免认证，适合 Agent）/ 邮箱 + 个人 API Key（直观，适合人工）
 - **管理后台** — Web UI 管理用户、账号、服务、日志
@@ -28,12 +29,12 @@ ENCRYPTION_KEY=请设置随机密钥 JWT_SECRET=请设置随机密钥 npm start
 
 - 用户名 `admin` / 密码 `admin123`，角色 `admin`
 
-## 角色（单服务一个团队，账号池全局共享）
+## 角色（单服务一个团队，账号按归属隔离）
 
 | 角色 | 权限 |
 |------|------|
-| `admin` | 管账号（增删改/导入/状态/轮换）、管用户（升降级 admin/member、重置密码、删除）、看日志/服务/控制台 |
-| `member` | 浏览账号 + 取码 +（独占号）自助领用；不能管理账号/用户 |
+| `admin` | 看/管全部账号（增删改/导入/状态/轮换/分配）、管用户（升降级 admin/member、重置密码、删除）、看日志/服务/控制台 |
+| `member` | 自助添加账号(成为归属人) + 管理/取码/分配自己的账号 + 取被分配账号的码；只看到「自己添加 + 被分配给自己」的账号；不能管用户/看日志 |
 
 注册即 `member`；管理员可在用户管理把成员升级为 `admin`（也能降级，但不能改自己以防自锁）。
 
@@ -134,7 +135,9 @@ mailcatcher user list / server list / log list / stats
 | POST | `/api/admin/email/create` | 添加账号（self/forward，返回一次性令牌） |
 | PUT | `/api/admin/email/update` | 编辑账号 |
 | POST | `/api/admin/email/set-status` | 变更健康状态（审计） |
-| POST | `/api/admin/email/assign` | 领用 / 释放 |
+| POST | `/api/admin/email/grant` | 分配账号给用户（owner/admin；独占替换、共享多人） |
+| POST | `/api/admin/email/revoke` | 收回某用户的分配 |
+| GET | `/api/admin/user/options` | 用户下拉(id+名)，供分配用 |
 | POST | `/api/admin/email/rotate-token` | 轮换查询令牌 |
 | POST | `/api/admin/email/import` | 批量导入（self） |
 | DELETE | `/api/admin/email/delete/:id` | 删除 |

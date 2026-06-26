@@ -5,7 +5,14 @@ import { authMiddleware, requireRole } from '../middleware/auth.js';
 
 const router = Router();
 router.use(authMiddleware);
-router.use(requireRole('admin')); // 仅管理员可管理用户
+
+// 用户选项（仅 id+用户名）：供"分配账号"下拉用，任何登录用户可读（owner 也能分配自己的账号）
+router.get('/options', (req, res) => {
+  const list = db.prepare('SELECT id, username FROM users WHERE status = 1 ORDER BY username').all();
+  res.json({ code: 200, data: { list }, message: 'success' });
+});
+
+router.use(requireRole('admin')); // 以下：仅管理员可管理用户
 
 const ROLES = ['admin', 'member'];
 

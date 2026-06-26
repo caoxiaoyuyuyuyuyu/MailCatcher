@@ -117,6 +117,8 @@ for (const [col, def] of [
   ['token_prefix', "TEXT DEFAULT ''"],
   ['health_status', "TEXT DEFAULT 'active'"],
   ['fail_count', 'INTEGER DEFAULT 0'],
+  ['created_by', 'INTEGER'],            // 添加人(归属)；NULL=历史账号(仅 admin 可见)
+  ['shared', 'INTEGER DEFAULT 0'],      // 0=独占(Claude,单人) 1=共享(Codex,可多人)
 ]) addColumnIfMissing('emails', col, def);
 
 for (const [col, def] of [
@@ -126,9 +128,18 @@ for (const [col, def] of [
 
 // 索引：必须在补齐新列之后创建（旧库升级路径下列才存在）
 db.exec(`
+  CREATE TABLE IF NOT EXISTS account_grants (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    granted_by INTEGER,
+    created_at DATETIME DEFAULT (datetime('now')),
+    UNIQUE(account_id, user_id)
+  );
   CREATE INDEX IF NOT EXISTS idx_emails_token_hash ON emails(token_hash);
-  CREATE INDEX IF NOT EXISTS idx_emails_team ON emails(team_id);
-  CREATE INDEX IF NOT EXISTS idx_logs_team ON email_logs(team_id);
+  CREATE INDEX IF NOT EXISTS idx_emails_created_by ON emails(created_by);
+  CREATE INDEX IF NOT EXISTS idx_grants_user ON account_grants(user_id);
+  CREATE INDEX IF NOT EXISTS idx_grants_account ON account_grants(account_id);
 `);
 
 // ── 一次性回填：把旧版明文 token/password 迁移到 token_hash/password_enc ──

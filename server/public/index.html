@@ -153,46 +153,50 @@
           <el-option v-for="h in healthOptions" :key="h.value" :label="h.label" :value="h.value"></el-option>
         </el-select>
         <el-button type="primary" @click="loadAccounts">搜索</el-button>
-        <template v-if="isAdmin">
-          <el-button type="success" @click="showAddAccount">添加账号</el-button>
-          <el-button type="warning" @click="showImport">批量导入(自管)</el-button>
-          <el-button type="danger" @click="deleteSelectedAccounts" :disabled="!selectedAccounts.length">批量删除</el-button>
-        </template>
+        <el-button type="success" @click="showAddAccount">添加账号</el-button>
+        <el-button type="warning" @click="showImport">批量导入(自管)</el-button>
+        <el-button type="danger" @click="deleteSelectedAccounts" :disabled="!selectedAccounts.length">批量删除</el-button>
       </div>
+      <p class="hint" style="margin:-8px 0 12px">你能看到：自己添加的 + 管理员分配给你的账号。任何人都可添加账号（成为归属人）；他人添加的账号由其归属人或管理员分配。</p>
       <el-table :data="accountList" border stripe @selection-change="v => selectedAccounts = v" max-height="560">
-        <el-table-column v-if="isAdmin" type="selection" width="42"></el-table-column>
-        <el-table-column label="邮箱地址" min-width="200" show-overflow-tooltip>
+        <el-table-column type="selection" width="42"></el-table-column>
+        <el-table-column label="邮箱地址" min-width="190" show-overflow-tooltip>
           <template #default="{row}">
             <div>{{ row.address }}</div>
             <div v-if="row.fetch_address" class="hint">收件: {{ row.fetch_address }}</div>
           </template>
         </el-table-column>
-        <el-table-column label="来源" width="90" align="center">
+        <el-table-column label="来源" width="80" align="center">
           <template #default="{row}"><el-tag size="small" :type="row.source==='forward'?'warning':'primary'">{{ row.source==='forward'?'171mail':'自管' }}</el-tag></template>
         </el-table-column>
-        <el-table-column label="令牌" width="150">
+        <el-table-column label="类型" width="80" align="center">
+          <template #default="{row}"><el-tag size="small" :type="row.shared?'success':'info'">{{ row.shared?'共享':'独占' }}</el-tag></template>
+        </el-table-column>
+        <el-table-column label="令牌" width="140">
           <template #default="{row}">
             <span class="hint">{{ row.token_prefix || '—' }}</span>
-            <el-button v-if="isAdmin" link size="small" @click="rotateToken(row)">轮换</el-button>
+            <el-button v-if="row.can_manage" link size="small" @click="rotateToken(row)">轮换</el-button>
           </template>
         </el-table-column>
-        <el-table-column label="健康状态" width="110" align="center">
+        <el-table-column label="健康状态" width="100" align="center">
           <template #default="{row}"><el-tag size="small" :type="healthTag(row.health_status)">{{ healthLabel(row.health_status) }}</el-tag></template>
         </el-table-column>
-        <el-table-column label="领用人" width="120" align="center">
-          <template #default="{row}"><span v-if="row.assignee_name">{{ row.assignee_name }}</span><span v-else class="hint">空闲</span></template>
+        <el-table-column label="添加人" width="120" show-overflow-tooltip>
+          <template #default="{row}"><span v-if="row.created_by_name">{{ row.created_by_name }}</span><span v-else class="hint">—</span></template>
         </el-table-column>
-        <el-table-column label="启用" width="70" align="center">
+        <el-table-column label="分配给" min-width="130" show-overflow-tooltip>
+          <template #default="{row}"><span v-if="row.grantees && row.grantees.length">{{ row.grantees.map(g=>g.username).join('、') }}</span><span v-else class="hint">未分配</span></template>
+        </el-table-column>
+        <el-table-column label="启用" width="60" align="center">
           <template #default="{row}"><el-tag size="small" :type="row.status===1?'success':'info'">{{ row.status===1?'是':'否' }}</el-tag></template>
         </el-table-column>
         <el-table-column label="操作" width="280" align="center">
           <template #default="{row}">
-            <el-button v-if="isAdmin" link size="small" type="primary" @click="editAccount(row)">编辑</el-button>
-            <el-button v-if="isAdmin" link size="small" @click="showStatus(row)">状态</el-button>
-            <el-button v-if="!row.assignee_id" link size="small" type="success" @click="claim(row)">领用</el-button>
-            <el-button v-else-if="row.assignee_id===me.id || isAdmin" link size="small" type="warning" @click="release(row)">释放</el-button>
+            <el-button v-if="row.can_manage" link size="small" type="primary" @click="editAccount(row)">编辑</el-button>
+            <el-button v-if="row.can_manage" link size="small" @click="showStatus(row)">状态</el-button>
+            <el-button v-if="row.can_manage" link size="small" type="success" @click="showAssign(row)">分配</el-button>
             <el-button link size="small" @click="fetchFromRow(row)">取码</el-button>
-            <el-button v-if="isAdmin" link size="small" type="danger" @click="deleteAccount(row.id)">删除</el-button>
+            <el-button v-if="row.can_manage" link size="small" type="danger" @click="deleteAccount(row.id)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -319,6 +323,10 @@
         <el-form-item label="上游"><el-input v-model="accForm.forward_provider" placeholder="171mail"></el-input></el-form-item>
         <el-form-item label="上游令牌" :required="!accForm.id"><el-input v-model="accForm.forward_token" :placeholder="accForm.id?'留空则不修改':'171mail 的 token'"></el-input></el-form-item>
       </template>
+      <el-form-item label="可多人共用">
+        <el-switch v-model="accForm.shared" :active-value="1" :inactive-value="0"></el-switch>
+        <span class="hint" style="margin-left:8px">开=共享(如 Codex，可分配给多人)；关=独占(如 Claude，单人)</span>
+      </el-form-item>
       <el-form-item v-if="accForm.id" label="启用"><el-switch v-model="accForm.status" :active-value="1" :inactive-value="0"></el-switch></el-form-item>
     </el-form>
     <template #footer><el-button @click="accDialog=false">取消</el-button><el-button type="primary" :loading="accSaving" @click="saveAccount">保存</el-button></template>
@@ -331,6 +339,28 @@
       <el-form-item label="原因"><el-input v-model="statusForm.reason" placeholder="可选，记入审计"></el-input></el-form-item>
     </el-form>
     <template #footer><el-button @click="statusDialog=false">取消</el-button><el-button type="primary" @click="saveStatus">确定</el-button></template>
+  </el-dialog>
+
+  <!-- 分配账号给用户 -->
+  <el-dialog v-model="assignDialog" title="分配账号" width="460px">
+    <p class="hint" style="margin:0 0 10px">
+      {{ assignAcc.address }} ·
+      <el-tag size="small" :type="assignAcc.shared?'success':'info'">{{ assignAcc.shared?'共享(可多人)':'独占(单人)' }}</el-tag>
+    </p>
+    <div style="margin-bottom:12px">
+      <div v-if="assignAcc.grantees.length" style="display:flex;flex-wrap:wrap;gap:6px">
+        <el-tag v-for="g in assignAcc.grantees" :key="g.user_id" closable @close="doRevoke(g.user_id)">{{ g.username }}</el-tag>
+      </div>
+      <span v-else class="hint">尚未分配给任何人</span>
+    </div>
+    <div style="display:flex;gap:8px">
+      <el-select v-model="assignUserId" filterable placeholder="选择用户" style="flex:1">
+        <el-option v-for="u in userOptions" :key="u.id" :label="u.username" :value="u.id"></el-option>
+      </el-select>
+      <el-button type="primary" @click="doGrant">分配</el-button>
+    </div>
+    <p v-if="!assignAcc.shared" class="hint" style="margin:10px 0 0">独占账号：再分配会替换当前的人。</p>
+    <template #footer><el-button @click="assignDialog=false">关闭</el-button></template>
   </el-dialog>
 
   <!-- 用户 编辑（角色 / 状态）-->
@@ -529,7 +559,7 @@ createApp({
     const accSearch = ref(''), accSourceFilter = ref(''), accHealthFilter = ref('');
     const selectedAccounts = ref([]);
     const accDialog = ref(false), accSaving = ref(false);
-    const accForm = reactive({ id: null, source: 'self', address: '', password: '', appkey: '', fetch_address: '', forward_provider: '171mail', forward_token: '', status: 1 });
+    const accForm = reactive({ id: null, source: 'self', address: '', password: '', appkey: '', fetch_address: '', forward_provider: '171mail', forward_token: '', shared: 0, status: 1 });
     let accountsLoaded = false;
     async function loadAccounts() {
       const q = `page=${accPage.value}&pageSize=30&keyword=${encodeURIComponent(accSearch.value)}&source=${accSourceFilter.value}&health=${accHealthFilter.value}`;
@@ -538,11 +568,11 @@ createApp({
     }
     function ensureAccountsLoaded() { if (!accountsLoaded && isLoggedIn.value) loadAccounts(); }
     function showAddAccount() {
-      Object.assign(accForm, { id: null, source: 'self', address: '', password: '', appkey: '', fetch_address: '', forward_provider: '171mail', forward_token: '', status: 1 });
+      Object.assign(accForm, { id: null, source: 'self', address: '', password: '', appkey: '', fetch_address: '', forward_provider: '171mail', forward_token: '', shared: 0, status: 1 });
       accDialog.value = true;
     }
     function editAccount(row) {
-      Object.assign(accForm, { id: row.id, source: row.source, address: row.address, password: '', appkey: row.appkey, fetch_address: row.fetch_address || '', forward_provider: row.forward_provider || '171mail', forward_token: '', status: row.status });
+      Object.assign(accForm, { id: row.id, source: row.source, address: row.address, password: '', appkey: row.appkey, fetch_address: row.fetch_address || '', forward_provider: row.forward_provider || '171mail', forward_token: '', shared: row.shared ? 1 : 0, status: row.status });
       accDialog.value = true;
     }
     async function saveAccount() {
@@ -581,8 +611,29 @@ createApp({
       const r = await api('POST', '/api/admin/email/rotate-token', { id: row.id });
       if (r.code === 200) { showSecret('新查询令牌', r.data.token); loadAccounts(); } else ElMessage.error(r.message);
     }
-    async function claim(row) { if (ok(await api('POST', '/api/admin/email/assign', { id: row.id, assignee_id: me.id }), '已领用')) loadAccounts(); }
-    async function release(row) { if (ok(await api('POST', '/api/admin/email/assign', { id: row.id, assignee_id: null }), '已释放')) loadAccounts(); }
+    // ── 分配 / 收回（owner 或 admin）。独占=单人替换，共享=可多人 ──
+    const assignDialog = ref(false), userOptions = ref([]), assignUserId = ref(null);
+    const assignAcc = reactive({ id: null, address: '', shared: 0, grantees: [] });
+    async function showAssign(row) {
+      Object.assign(assignAcc, { id: row.id, address: row.address, shared: row.shared, grantees: row.grantees || [] });
+      assignUserId.value = null;
+      assignDialog.value = true;
+      const r = await api('GET', '/api/admin/user/options');
+      if (r.code === 200) userOptions.value = r.data.list;
+    }
+    async function refreshAssign() {
+      const r = await api('GET', '/api/admin/email/list?keyword=' + encodeURIComponent(assignAcc.address));
+      const row = r.code === 200 ? r.data.list.find(a => a.id === assignAcc.id) : null;
+      if (row) assignAcc.grantees = row.grantees || [];
+      loadAccounts();
+    }
+    async function doGrant() {
+      if (!assignUserId.value) return ElMessage.warning('请选择用户');
+      if (ok(await api('POST', '/api/admin/email/grant', { id: assignAcc.id, user_id: assignUserId.value }), '已分配')) { assignUserId.value = null; refreshAssign(); }
+    }
+    async function doRevoke(userId) {
+      if (ok(await api('POST', '/api/admin/email/revoke', { id: assignAcc.id, user_id: userId }), '已收回')) refreshAssign();
+    }
 
     const statusDialog = ref(false);
     const statusForm = reactive({ id: null, health_status: 'active', reason: '' });
@@ -679,7 +730,8 @@ createApp({
       codexLoading, codexLoginAndFetch,
       stats,
       accountList, accTotal, accPage, accSearch, accSourceFilter, accHealthFilter, selectedAccounts, loadAccounts,
-      accDialog, accSaving, accForm, showAddAccount, editAccount, saveAccount, deleteAccount, deleteSelectedAccounts, rotateToken, claim, release,
+      accDialog, accSaving, accForm, showAddAccount, editAccount, saveAccount, deleteAccount, deleteSelectedAccounts, rotateToken,
+      assignDialog, userOptions, assignUserId, assignAcc, showAssign, doGrant, doRevoke,
       statusDialog, statusForm, showStatus, saveStatus,
       importDialog, importText, importLoading, showImport, doImport,
       secretDialog,
