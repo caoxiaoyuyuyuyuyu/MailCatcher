@@ -1,51 +1,35 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import db from '../db.js';
-import { authMiddleware, requireRole, isSuper } from '../middleware/auth.js';
+import { authMiddleware, requireRole } from '../middleware/auth.js';
 
 const router = Router();
 router.use(authMiddleware);
-router.use(requireRole('super_admin', 'team_admin')); // 成员无用户管理权限
+router.use(requireRole('admin')); // 仅管理员可管理用户
 
-const ROLES = ['super_admin', 'team_admin', 'member'];
-const publicCols = 'id, username, role, team_id, status, created_at';
-
-// team_admin 只能操作本团队的 member；super_admin 不受限
-function canManageTarget(req, target) {
-  if (isSuper(req)) return true;
-  if (!target) return false;
-  return target.team_id === req.user.team_id && target.role === 'member';
-}
+const ROLES = ['admin', 'member'];
 
 router.get('/list', (req, res) => {
   const { keyword = '' } = req.query;
   let where = '1=1';
   const params = [];
-  if (!isSuper(req)) { where += ' AND team_id = ?'; params.push(req.user.team_id ?? -1); }
   if (keyword) { where += ' AND username LIKE ?'; params.push(`%${keyword}%`); }
-  const rows = db.prepare(`SELECT ${publicCols}, (api_key_hash IS NOT NULL) AS has_api_key FROM users WHERE ${where} ORDER BY id`).all(...params);
-  const teams = Object.fromEntries(db.prepare('SELECT id, name FROM teams').all().map(t => [t.id, t.name]));
-  const list = rows.map(u => ({ ...u, team_name: u.team_id ? teams[u.team_id] || null : null }));
+  const list = db.prepare(
+    `SELECT id, username, role, status, created_at, (api_key_hash IS NOT NULL) AS has_api_key
+     FROM users WHERE ${where} ORDER BY id`
+  ).all(...params);
   res.json({ code: 200, data: { list, total: list.length } });
 });
 
+// 保留创建端点（前端入口已移除，主要供脚本/测试用）
 router.post('/create', (req, res) => {
-  let { username, password, role = 'member', team_id } = req.body;
+  const { username, password, role = 'member' } = req.body;
   if (!username || !password) return res.json({ code: 400, message: '用户名和密码不能为空' });
   if (!ROLES.includes(role)) return res.json({ code: 400, message: '非法角色' });
-
-  if (!isSuper(req)) {
-    // team_admin：只能在本团队创建 member
-    if (role !== 'member') return res.json({ code: 403, message: '只能创建普通成员' });
-    team_id = req.user.team_id;
-  }
-  if (role !== 'super_admin' && !team_id) return res.json({ code: 400, message: '请指定团队' });
-  if (role === 'super_admin') team_id = null;
-
   try {
     const hash = bcrypt.hashSync(password, 10);
-    const info = db.prepare('INSERT INTO users (username, password_hash, role, team_id) VALUES (?, ?, ?, ?)')
-      .run(username, hash, role, team_id ?? null);
+    const info = db.prepare('INSERT INTO users (username, password_hash, role, status) VALUES (?, ?, ?, 1)')
+      .run(username, hash, role);
     res.json({ code: 200, data: { id: info.lastInsertRowid }, message: 'success' });
   } catch (err) {
     if (err.message.includes('UNIQUE')) return res.json({ code: 400, message: '用户名已存在' });
@@ -53,32 +37,28 @@ router.post('/create', (req, res) => {
   }
 });
 
+// 管理员可设置他人角色(admin/member)与启用状态；不可改自己（防自锁）
 router.put('/update', (req, res) => {
-  const { id, role, team_id, status } = req.body;
+  const { id, role, status } = req.body;
   if (!id) return res.json({ code: 400, message: 'id 不能为空' });
   const target = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
   if (!target) return res.json({ code: 404, message: '用户不存在' });
-  if (!canManageTarget(req, target)) return res.json({ code: 403, message: '无权操作该用户' });
+  if (id === req.user.id) return res.json({ code: 400, message: '不能修改自己的角色或状态' });
 
-  let nextRole = target.role, nextTeam = target.team_id, nextStatus = target.status;
-  if (isSuper(req)) {
-    if (role !== undefined) { if (!ROLES.includes(role)) return res.json({ code: 400, message: '非法角色' }); nextRole = role; }
-    if (team_id !== undefined) nextTeam = team_id || null;
-    if (nextRole === 'super_admin') nextTeam = null;
-    else if (!nextTeam) return res.json({ code: 400, message: '请指定团队' });
+  let nextRole = target.role, nextStatus = target.status;
+  if (role !== undefined) {
+    if (!ROLES.includes(role)) return res.json({ code: 400, message: '非法角色' });
+    nextRole = role;
   }
   if (status !== undefined) nextStatus = status ? 1 : 0;
-
-  db.prepare('UPDATE users SET role = ?, team_id = ?, status = ? WHERE id = ?')
-    .run(nextRole, nextTeam, nextStatus, id);
+  db.prepare('UPDATE users SET role = ?, status = ? WHERE id = ?').run(nextRole, nextStatus, id);
   res.json({ code: 200, message: 'success' });
 });
 
 router.post('/reset-password', (req, res) => {
   const { id, newPassword } = req.body;
   if (!id || !newPassword) return res.json({ code: 400, message: 'id 和新密码不能为空' });
-  const target = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
-  if (!canManageTarget(req, target)) return res.json({ code: 403, message: '无权操作该用户' });
+  if (!db.prepare('SELECT id FROM users WHERE id = ?').get(id)) return res.json({ code: 404, message: '用户不存在' });
   db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(newPassword, 10), id);
   res.json({ code: 200, message: 'success' });
 });
@@ -86,8 +66,7 @@ router.post('/reset-password', (req, res) => {
 router.delete('/delete/:id', (req, res) => {
   const id = Number(req.params.id);
   if (id === req.user.id) return res.json({ code: 400, message: '不能删除自己' });
-  const target = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
-  if (!canManageTarget(req, target)) return res.json({ code: 403, message: '无权操作该用户' });
+  if (!db.prepare('SELECT id FROM users WHERE id = ?').get(id)) return res.json({ code: 404, message: '用户不存在' });
   db.prepare('DELETE FROM users WHERE id = ?').run(id);
   res.json({ code: 200, message: 'success' });
 });

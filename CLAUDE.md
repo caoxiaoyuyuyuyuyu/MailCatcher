@@ -84,7 +84,7 @@ MailCatcher 已从「纯接码工具」演进为「**多租户账号管理 + 统
 
 - **后端**: Node.js + Express + SQLite (better-sqlite3) + imapflow + playwright-core
 - **前端**: Vue 3 + Element Plus (CDN 模式，单 HTML 文件)
-- **多租户**: teams + users(三级角色 super_admin/team_admin/member)，账号/日志按 team 隔离
+- **单团队 + 两级角色**: 一个服务一个团队；users 仅 `admin` / `member`。账号池全局共享（无团队隔离），管理员管账号/用户，成员只浏览+取码+(独占)自助领用；管理员可升降级他人
 - **账号来源(source)**:
   - `self` — 自管邮箱，本地 IMAP/mailcom 取码（密码 AES-GCM 加密存）
   - `forward` — 171mail 账号，转发到 `b.171mail.com/api/v1/message`（上游 token 加密存）
@@ -94,7 +94,7 @@ MailCatcher 已从「纯接码工具」演进为「**多租户账号管理 + 统
 - **核心流程**: 我方 token → token_hash 查账号 → 按 source 走本地/转发 → 提取验证码
 - **启动**: `cd server && npm start` → `http://localhost:3000`
 - **测试**: `cd server && npm test`
-- **默认管理员**: admin / admin123（super_admin）
+- **默认管理员**: admin / admin123（角色 `admin`）
 
 ### 关键路径
 
@@ -103,12 +103,12 @@ MailCatcher 已从「纯接码工具」演进为「**多租户账号管理 + 统
 - `server/src/services/mailcom.js` — mail.com Web API 抓取（self 账号）
 - `server/src/services/forward171.js` — 171mail 转发适配器（forward 账号）
 - `server/src/services/crypto.js` — AES-256-GCM 加解密 + token hash（方案乙）
-- `server/src/middleware/auth.js` — JWT + requireRole + teamScope 团队隔离
+- `server/src/middleware/auth.js` — JWT + requireRole(admin/member) + resolvePrincipal
 - `server/src/routes/message.js` — 接码 API (`/api/v1/message`)，按 source 分发本地/转发
-- `server/src/routes/emails.js` — 账号 CRUD（source/状态机/领用/token 轮换/团队隔离）
-- `server/src/routes/teams.js` / `users.js` — 团队与用户管理（RBAC）
+- `server/src/routes/emails.js` — 账号 CRUD（source/状态机/领用/token 轮换；增删改仅 admin）
+- `server/src/routes/users.js` — 用户管理（admin 升降级/重置/删除；防自锁）
 - `server/src/routes/mailServers.js` — IMAP 服务器配置
-- `server/src/db.js` — SQLite schema（多租户 + 账号来源 + 状态系统）
+- `server/src/db.js` — SQLite schema（账号来源 + 状态系统）
 - `server/test/run-tests.mjs` — 集成测试（内置 mock171），`npm test`
 - `server/public/index.html` — 完整前端 UI
 
@@ -133,7 +133,7 @@ mailcatcher log list / clear            # 日志管理
 - **环境变量**：生产必须设置 `ENCRYPTION_KEY`（加密 IMAP 密码/171mail token）与 `JWT_SECRET`；缺省会告警
 - **账号来源**：`source=self` 走本地 IMAP/mailcom；`source=forward` 转发到 171mail（密文存上游 token）
 - **方案乙**：所有账号对外都用我方签发的 token（库内存 hash，创建/轮换时明文仅显示一次）
-- **默认管理员**：admin / admin123，角色为 `super_admin`（跨团队）
-- **自助注册**：`POST /api/admin/register`（公开），邮箱须 `@apexin.ai` 后缀 + 密码二次确认（≥6 位）；注册即 `member`、无团队，登录后由管理员在用户管理分配团队/角色。邮箱登录大小写不敏感
-- **前端导航按角色显隐**：member 只见「在线接码 + 账号管理」（登录落地账号管理）；管理员(super_admin/team_admin)另见控制台/用户管理/服务配置/查询日志/个人；团队管理仅 super_admin
+- **默认管理员**：admin / admin123，角色 `admin`（旧库 super_admin/team_admin 启动时自动迁移为 admin）
+- **自助注册**：`POST /api/admin/register`（公开），邮箱须 `@apexin.ai` 后缀 + 密码二次确认（≥6 位）；注册即 `member`，登录后由管理员在用户管理升级为 admin。邮箱登录大小写不敏感
+- **前端导航按角色显隐**：member 只见「在线接码 + 账号管理」（登录落地账号管理，且账号页无增删改按钮）；admin 另见控制台/用户管理/服务配置/查询日志/个人
 - **可配置**：`MAILCATCHER_DATA_DIR`（DB 目录）、`FORWARD_171_BASE`（171mail 地址，测试用）、`REGISTER_EMAIL_SUFFIX`（注册邮箱后缀，默认 `@apexin.ai`）

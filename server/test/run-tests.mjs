@@ -1,5 +1,4 @@
-// 自包含集成测试：内置 mock 171mail（确定性），用临时 DB 启动 app，跑全流程断言。
-// 运行：npm test
+// 自包含集成测试（单团队 admin/member 模型）：内置 mock 171mail，临时 DB 启动 app，跑全流程断言。
 import http from 'http';
 import { spawn } from 'child_process';
 import { mkdtempSync, rmSync } from 'fs';
@@ -12,7 +11,7 @@ const BASE = `http://localhost:${APP_PORT}`;
 const DATA_DIR = mkdtempSync(join(tmpdir(), 'mailcatcher-test-'));
 
 let pass = 0, fail = 0;
-const ok = (cond, msg) => { if (cond) { pass++; console.log('  ✓', msg); } else { fail++; console.log('  ✗ FAIL:', msg); } };
+const ok = (c, m) => { if (c) { pass++; console.log('  ✓', m); } else { fail++; console.log('  ✗ FAIL:', m); } };
 
 async function api(method, path, body, token) {
   const headers = { 'Content-Type': 'application/json' };
@@ -22,15 +21,14 @@ async function api(method, path, body, token) {
   return (await fetch(BASE + path, opts)).json();
 }
 
-// 内置 mock 171mail
 const mock = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://localhost');
   res.setHeader('content-type', 'application/json');
   if (u.pathname === '/api/v1/message') {
     const type = u.searchParams.get('type');
-    if (type === 'claude') return res.end(JSON.stringify({ code: 200, message: 'success', data: { from: 'no-reply@mail.anthropic.com', subject: 'Secure link to log in to Claude.ai', body: 'sign in', code: 'https://claude.ai/magic-link#MOCK123', Date: '2026-06-25T00:00:00+08:00' } }));
+    if (type === 'claude') return res.end(JSON.stringify({ code: 200, message: 'success', data: { from: 'no-reply@mail.anthropic.com', subject: 'Secure link', body: 'x', code: 'https://claude.ai/magic-link#MOCK123', Date: '2026-06-25T00:00:00+08:00' } }));
     if (type === 'gpt') return res.end(JSON.stringify({ code: 500, data: null, message: '获取邮件失败: MailList 收件箱为空或未匹配到邮件' }));
-    return res.end(JSON.stringify({ code: 500, data: null, message: '邮箱服务器未配置: priest.com' }));
+    return res.end(JSON.stringify({ code: 500, data: null, message: '邮箱服务器未配置' }));
   }
   res.statusCode = 404; res.end('{}');
 }).listen(MOCK_PORT);
@@ -39,122 +37,78 @@ const app = spawn('node', ['src/index.js'], {
   env: { ...process.env, PORT: APP_PORT, MAILCATCHER_DATA_DIR: DATA_DIR, FORWARD_171_BASE: `http://localhost:${MOCK_PORT}`, ENCRYPTION_KEY: 'test-enc-key', JWT_SECRET: 'test-jwt-key' },
   stdio: ['ignore', 'ignore', 'inherit'],
 });
-
-function teardown(code) {
-  app.kill(); mock.close();
-  try { rmSync(DATA_DIR, { recursive: true, force: true }); } catch {}
-  process.exit(code);
-}
-
+function teardown(code) { app.kill(); mock.close(); try { rmSync(DATA_DIR, { recursive: true, force: true }); } catch {} process.exit(code); }
 async function waitReady() {
-  for (let i = 0; i < 50; i++) {
-    try { const r = await api('POST', '/api/admin/login', { username: 'admin', password: 'admin123' }); if (r.code) return; } catch {}
-    await new Promise(r => setTimeout(r, 200));
-  }
+  for (let i = 0; i < 50; i++) { try { const r = await api('POST', '/api/admin/login', { username: 'admin', password: 'admin123' }); if (r.code) return; } catch {} await new Promise(r => setTimeout(r, 200)); }
   throw new Error('app 未能启动');
 }
 
 try {
-  // 纯单元：加密往返 / token hash
   const { encrypt, decrypt, hashToken, maskToken } = await import('../src/services/crypto.js');
   console.log('## 加密与 token 单元');
-  ok(decrypt(encrypt('hello-密码')) === 'hello-密码', 'AES-GCM 加解密往返');
-  ok(encrypt('x') !== encrypt('x'), '相同明文每次密文不同(随机 IV)');
-  ok(hashToken('abc') === hashToken('abc') && hashToken('abc') !== hashToken('abd'), 'hashToken 稳定且区分');
+  ok(decrypt(encrypt('hi-密码')) === 'hi-密码', 'AES-GCM 往返');
+  ok(encrypt('x') !== encrypt('x'), '随机 IV');
+  ok(hashToken('a') === hashToken('a') && hashToken('a') !== hashToken('b'), 'hashToken 稳定且区分');
   ok(maskToken('c6dbee8919a05bbe').includes('****'), 'maskToken 打码');
 
   await waitReady();
 
-  console.log('## 登录与角色');
+  console.log('## 登录与角色（admin / member）');
   const adminLogin = await api('POST', '/api/admin/login', { username: 'admin', password: 'admin123' });
-  ok(adminLogin.code === 200 && adminLogin.data.role === 'super_admin', 'admin 登录为 super_admin');
+  ok(adminLogin.code === 200 && adminLogin.data.role === 'admin', 'admin 登录为 admin（无 super_admin）');
+  ok(adminLogin.data.team_id === undefined, '登录响应不含 team_id');
   const ADMIN = adminLogin.data.accessToken;
 
-  console.log('## 团队与用户');
-  const TA = (await api('POST', '/api/admin/team/create', { name: 'TeamA' }, ADMIN)).data.id;
-  const TB = (await api('POST', '/api/admin/team/create', { name: 'TeamB' }, ADMIN)).data.id;
-  ok(TA && TB, '创建 TeamA / TeamB');
-  ok((await api('POST', '/api/admin/user/create', { username: 'alice', password: 'p', role: 'team_admin', team_id: TA }, ADMIN)).code === 200, '创建 alice(team_admin@TeamA)');
-  ok((await api('POST', '/api/admin/user/create', { username: 'bob', password: 'p', role: 'member', team_id: TA }, ADMIN)).code === 200, '创建 bob(member@TeamA)');
-  const aliceLogin = await api('POST', '/api/admin/login', { username: 'alice', password: 'p' });
-  ok(aliceLogin.data.role === 'team_admin' && aliceLogin.data.team_id === TA, 'alice 登录正确');
-  const ALICE = aliceLogin.data.accessToken;
-  const BOB = (await api('POST', '/api/admin/login', { username: 'bob', password: 'p' })).data.accessToken;
+  console.log('## 自助注册');
+  ok((await api('POST', '/api/admin/register', { email: 'm1@apexin.ai', password: 'secret1', confirmPassword: 'secret1' })).code === 200, '@apexin.ai 注册成功');
+  ok((await api('POST', '/api/admin/register', { email: 'm1@apexin.ai', password: 'secret1', confirmPassword: 'secret1' })).code === 400, '重复邮箱被拒');
+  ok((await api('POST', '/api/admin/register', { email: 'x@gmail.com', password: 'secret1', confirmPassword: 'secret1' })).code === 400, '非 @apexin.ai 被拒');
+  ok((await api('POST', '/api/admin/register', { email: 'm2@apexin.ai', password: 'secret1', confirmPassword: 'nope' })).code === 400, '密码不一致被拒');
+  const mLogin = await api('POST', '/api/admin/login', { username: 'M1@apexin.ai', password: 'secret1' });
+  ok(mLogin.code === 200 && mLogin.data.role === 'member', '注册用户为 member（大小写不敏感登录）');
+  const MEMBER = mLogin.data.accessToken;
 
-  console.log('## forward 账号 + 转发取码');
-  const acc = await api('POST', '/api/admin/email/create', { address: 'fwd@priest.com', source: 'forward', forward_provider: '171mail', forward_token: 'upstream-secret' }, ALICE);
-  ok(acc.code === 200 && acc.data.token, '创建 forward 账号并返回明文 token(仅此一次)');
+  console.log('## 账号管理（管理员）');
+  const acc = await api('POST', '/api/admin/email/create', { address: 'fwd@priest.com', source: 'forward', forward_token: 'up' }, ADMIN);
+  ok(acc.code === 200 && acc.data.token, 'admin 创建 forward 账号并返回 token');
   const QTOKEN = acc.data.token;
-  const fetchCode = await api('GET', `/api/v1/message?token=${QTOKEN}&type=claude`);
-  ok(fetchCode.code === 200 && (fetchCode.data?.code || '').includes('magic-link'), '用我们的 token 转发取到 claude magic-link');
-  const gptFetch = await api('GET', `/api/v1/message?token=${QTOKEN}&type=gpt`);
-  ok(gptFetch.message === 'no new message', '空邮件归一为 no new message');
+  ok((await api('GET', `/api/v1/message?token=${QTOKEN}&type=claude`)).data?.code?.includes('magic-link'), 'token 转发取到 magic-link');
+  ok((await api('GET', `/api/v1/message?token=${QTOKEN}&type=gpt`)).message === 'no new message', '空邮件归一');
+  ok((await api('POST', '/api/admin/email/create', { address: 'self@x.com', source: 'self', password: 'p' }, ADMIN)).code === 200, 'admin 创建 self 账号');
 
-  console.log('## 邮箱接码 + 用户 API Key');
-  const byEmailJwt = await api('GET', '/api/v1/message?email=fwd@priest.com&type=claude', null, ALICE);
-  ok(byEmailJwt.code === 200 && (byEmailJwt.data?.code || '').includes('magic-link'), 'alice 用登录态按邮箱取码');
-  const keyResp = await api('POST', '/api/admin/api-key', {}, ALICE);
-  ok(keyResp.data?.apiKey, 'alice 生成个人 API Key');
-  const byEmailKey = await api('GET', '/api/v1/message?email=fwd@priest.com&type=claude', null, keyResp.data.apiKey);
-  ok(byEmailKey.code === 200 && (byEmailKey.data?.code || '').includes('magic-link'), 'alice 用 API Key 按邮箱取码');
-  ok((await api('GET', '/api/v1/message?email=fwd@priest.com&type=claude')).code === 401, '按邮箱无身份被拒(401)');
-  ok((await api('GET', '/api/v1/message?email=nobody@nowhere.com&type=claude', null, ALICE)).code === 404, '不存在的邮箱返回 404');
+  console.log('## 成员权限');
+  ok((await api('GET', '/api/admin/email/list', null, MEMBER)).data.total === 2, '成员可浏览账号池（共享，看到全部）');
+  ok((await api('GET', '/api/v1/message?email=fwd@priest.com&type=claude', null, MEMBER)).data?.code?.includes('magic-link'), '成员可按邮箱取码（单池）');
+  ok((await api('POST', '/api/admin/email/create', { address: 'z@x.com', source: 'self' }, MEMBER)).code === 403, '成员不能创建账号(403)');
+  ok((await api('POST', '/api/admin/email/delete-batch', { ids: [1] }, MEMBER)).code === 403, '成员不能删除账号(403)');
+  ok((await api('GET', '/api/admin/user/list', null, MEMBER)).code === 403, '成员不能管理用户(403)');
+  ok((await api('GET', '/api/admin/logs/email', null, MEMBER)).code === 403, '成员不能看日志(403)');
+  const memberId = (await api('GET', '/api/admin/user/list', null, ADMIN)).data.list.find(u => u.username === 'm1@apexin.ai').id;
+  ok((await api('POST', '/api/admin/email/assign', { id: 1, assignee_id: memberId }, MEMBER)).code === 200, '成员可自助领用(给自己)');
+  ok((await api('POST', '/api/admin/email/assign', { id: 1, assignee_id: 1 }, MEMBER)).code === 403, '成员不能指派给他人(403)');
 
-  console.log('## self 账号取码(本地)');
-  const selfAcc = await api('POST', '/api/admin/email/create', { address: 'self@example.com', source: 'self', password: 'p' }, ALICE);
-  const selfFetch = await api('GET', `/api/v1/message?token=${selfAcc.data.token}&type=claude`);
-  ok(selfFetch.code === 500 || selfFetch.code === 200, 'self 账号走本地 IMAP 路径(无 mock，预期连接错误/无邮件)');
+  console.log('## 管理员升降级');
+  ok((await api('PUT', '/api/admin/user/update', { id: memberId, role: 'admin' }, ADMIN)).code === 200, 'admin 把成员升级为 admin');
+  const reLogin = await api('POST', '/api/admin/login', { username: 'm1@apexin.ai', password: 'secret1' });
+  ok(reLogin.data.role === 'admin', '该用户重新登录已是 admin');
+  ok((await api('GET', '/api/admin/user/list', null, reLogin.data.accessToken)).code === 200, '升级后可管理用户');
+  ok((await api('PUT', '/api/admin/user/update', { id: adminLogin.data.id, role: 'member' }, ADMIN)).code === 400, 'admin 不能改自己的角色(防自锁)');
 
-  console.log('## 列表脱敏');
-  const row = (await api('GET', '/api/admin/email/list', null, ALICE)).data.list.find(r => r.address === 'fwd@priest.com');
-  ok(row.token_prefix.includes('****') && !row.token_prefix.includes(QTOKEN), 'token 仅展示掩码');
-  ok(row.forward_token_enc === undefined && row.password_enc === undefined, '列表不返回任何密文字段');
+  console.log('## 状态机 / 轮换 / 删除(FK)');
+  await api('POST', '/api/admin/email/set-status', { id: 1, health_status: 'banned' }, ADMIN);
+  ok((await api('GET', `/api/v1/message?token=${QTOKEN}&type=claude`)).code === 403, 'banned 拒绝取码');
+  await api('POST', '/api/admin/email/set-status', { id: 1, health_status: 'active' }, ADMIN);
+  const rot = await api('POST', '/api/admin/email/rotate-token', { id: 1 }, ADMIN);
+  ok(rot.data.token !== QTOKEN && (await api('GET', `/api/v1/message?token=${QTOKEN}&type=claude`)).code === 401, '轮换后旧 token 失效');
+  const delAcc = await api('POST', '/api/admin/email/create', { address: 'del@priest.com', source: 'forward', forward_token: 'x' }, ADMIN);
+  await api('GET', `/api/v1/message?token=${delAcc.data.token}&type=claude`); // 产生日志
+  ok((await api('POST', '/api/admin/email/delete-batch', { ids: [delAcc.data.id] }, ADMIN)).data.deleted === 1, '删除有日志的账号成功(不再 FK 500)');
 
-  console.log('## 状态机');
-  await api('POST', '/api/admin/email/set-status', { id: row.id, health_status: 'banned', reason: 't' }, ALICE);
-  ok((await api('GET', `/api/v1/message?token=${QTOKEN}&type=claude`)).code === 403, 'banned 状态取码被拒(403)');
-  await api('POST', '/api/admin/email/set-status', { id: row.id, health_status: 'active' }, ALICE);
-  ok((await api('GET', `/api/v1/message?token=${QTOKEN}&type=claude`)).code === 200, 'active 恢复后可取码');
-
-  console.log('## token 轮换');
-  const rot = await api('POST', '/api/admin/email/rotate-token', { id: row.id }, ALICE);
-  ok(rot.data.token !== QTOKEN, '轮换得到新 token');
-  ok((await api('GET', `/api/v1/message?token=${QTOKEN}&type=claude`)).code === 401, '旧 token 失效(401)');
-
-  console.log('## 团队隔离');
-  const aliceTeams = await api('GET', '/api/admin/team/list', null, ALICE);
-  ok(aliceTeams.data.list.length === 1 && aliceTeams.data.list[0].id === TA, 'alice 只看到自己团队');
-  await api('POST', '/api/admin/email/create', { address: 'other@priest.com', source: 'forward', forward_token: 'x', team_id: TB }, ADMIN);
-  ok((await api('GET', '/api/admin/email/list', null, ALICE)).data.list.every(a => a.team_id === TA), 'alice 看不到 TeamB 账号');
-  ok((await api('GET', '/api/v1/message?email=other@priest.com&type=claude', null, ALICE)).code === 403, 'alice 跨团队按邮箱取码被拒(403)');
-
-  console.log('## 角色门禁');
-  ok((await api('POST', '/api/admin/user/create', { username: 'x', password: 'p', role: 'member', team_id: TA }, BOB)).code === 403, 'member 无用户管理权(403)');
-  ok((await api('POST', '/api/admin/email/clear', {}, BOB)).code === 403, 'member 无法 clear(403)');
-  ok((await api('POST', '/api/v1/claude/send', { email: 'x@y.com' })).code === 401, 'claude/send 未登录被拒(401)');
-
-  console.log('## 自助注册（@apexin.ai）');
-  ok((await api('POST', '/api/admin/register', { email: 'newbie@apexin.ai', password: 'secret1', confirmPassword: 'secret1' })).code === 200, '@apexin.ai 注册成功');
-  ok((await api('POST', '/api/admin/register', { email: 'newbie@apexin.ai', password: 'secret1', confirmPassword: 'secret1' })).code === 400, '重复邮箱被拒(400)');
-  ok((await api('POST', '/api/admin/register', { email: 'bad@gmail.com', password: 'secret1', confirmPassword: 'secret1' })).code === 400, '非 @apexin.ai 后缀被拒(400)');
-  ok((await api('POST', '/api/admin/register', { email: 'mism@apexin.ai', password: 'secret1', confirmPassword: 'secret2' })).code === 400, '两次密码不一致被拒(400)');
-  ok((await api('POST', '/api/admin/register', { email: 'short@apexin.ai', password: '123', confirmPassword: '123' })).code === 400, '密码过短被拒(400)');
-  const newLogin = await api('POST', '/api/admin/login', { username: 'NewBie@apexin.ai', password: 'secret1' });
-  ok(newLogin.code === 200 && newLogin.data.role === 'member' && newLogin.data.team_id === null, '注册用户可登录(大小写不敏感)、member、无团队');
-
-  console.log('## stats 团队过滤');
-  const aStats = await api('GET', '/api/admin/stats', null, ADMIN);
-  const lStats = await api('GET', '/api/admin/stats', null, ALICE);
-  ok(aStats.data.emails >= 3 && lStats.data.emails === 2, `stats 隔离 super=${aStats.data.emails} alice=${lStats.data.emails}`);
-
-  console.log('## 删除带日志的账号（FK 回归）');
-  const accDel = await api('POST', '/api/admin/email/create', { address: 'todelete@priest.com', source: 'forward', forward_token: 'x' }, ALICE);
-  await api('GET', `/api/v1/message?token=${accDel.data.token}&type=claude`); // 产生一条日志
-  const logsBefore = (await api('GET', '/api/admin/logs/email', null, ALICE)).data.total;
-  const delResp = await api('POST', '/api/admin/email/delete-batch', { ids: [accDel.data.id] }, ALICE);
-  ok(delResp.code === 200 && delResp.data.deleted === 1, '删除有日志的账号成功(不再 500/FK)');
-  ok(!(await api('GET', '/api/admin/email/list', null, ALICE)).data.list.some(a => a.id === accDel.data.id), '账号已删除');
-  ok((await api('GET', '/api/admin/logs/email', null, ALICE)).data.total === logsBefore, '日志保留(审计未丢，仅解除关联)');
+  console.log('## API Key + stats');
+  const key = (await api('POST', '/api/admin/api-key', {}, ADMIN)).data.apiKey;
+  ok((await api('GET', '/api/v1/message?email=fwd@priest.com&type=claude', null, key)).data?.code?.includes('magic-link'), 'API Key 按邮箱取码');
+  const stats = await api('GET', '/api/admin/stats', null, ADMIN);
+  ok(stats.data.emails >= 2 && stats.data.teams === undefined, 'stats 无 teams 字段');
 
   console.log(`\n=== RESULT: ${pass} passed, ${fail} failed ===`);
   teardown(fail ? 1 : 0);

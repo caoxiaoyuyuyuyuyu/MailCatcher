@@ -9,9 +9,8 @@ import mailServerRoutes from './routes/mailServers.js';
 import messageRoutes from './routes/message.js';
 import logRoutes from './routes/logs.js';
 import claudeRoutes from './routes/claude.js';
-import teamRoutes from './routes/teams.js';
 import userRoutes from './routes/users.js';
-import { authMiddleware, isSuper } from './middleware/auth.js';
+import { authMiddleware } from './middleware/auth.js';
 import db from './db.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -22,7 +21,6 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
 app.use('/api/admin', authRoutes);
-app.use('/api/admin/team', teamRoutes);
 app.use('/api/admin/user', userRoutes);
 app.use('/api/admin/email', emailRoutes);
 app.use('/api/admin/mail-server', mailServerRoutes);
@@ -33,20 +31,11 @@ app.use('/api/admin/logs', logRoutes);
 app.use(express.static(join(__dirname, '..', 'public')));
 
 app.get('/api/admin/stats', authMiddleware, (req, res) => {
-  const scoped = !isSuper(req);
-  const tid = req.user.team_id ?? -1;
-  const emails = scoped
-    ? db.prepare('SELECT COUNT(*) c FROM emails WHERE team_id = ?').get(tid).c
-    : db.prepare('SELECT COUNT(*) c FROM emails').get().c;
-  const logs = scoped
-    ? db.prepare('SELECT COUNT(*) c FROM email_logs WHERE team_id = ?').get(tid).c
-    : db.prepare('SELECT COUNT(*) c FROM email_logs').get().c;
-  const successLogs = scoped
-    ? db.prepare('SELECT COUNT(*) c FROM email_logs WHERE success = 1 AND team_id = ?').get(tid).c
-    : db.prepare('SELECT COUNT(*) c FROM email_logs WHERE success = 1').get().c;
+  const emails = db.prepare('SELECT COUNT(*) c FROM emails').get().c;
   const servers = db.prepare('SELECT COUNT(*) c FROM mail_servers').get().c;
-  const teams = isSuper(req) ? db.prepare('SELECT COUNT(*) c FROM teams').get().c : 1;
-  res.json({ code: 200, data: { emails, servers, logs, successLogs, teams } });
+  const logs = db.prepare('SELECT COUNT(*) c FROM email_logs').get().c;
+  const successLogs = db.prepare('SELECT COUNT(*) c FROM email_logs WHERE success = 1').get().c;
+  res.json({ code: 200, data: { emails, servers, logs, successLogs } });
 });
 
 app.get('*', (req, res) => {

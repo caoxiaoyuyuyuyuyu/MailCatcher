@@ -8,8 +8,8 @@ npm install
 npm test        # 内置 mock 171mail，确定性运行；当前 31 项断言全绿
 ```
 
-覆盖：加密往返 / token hash、登录与三级角色、团队与用户 CRUD、forward 转发取码、
-**邮箱接码 + 用户 API Key**、列表脱敏、健康状态机、token 轮换、团队隔离、角色门禁、stats 过滤。
+覆盖：加密往返 / token hash、登录与双角色(admin/member)、自助注册、forward 转发取码、
+**邮箱接码 + 用户 API Key**、成员权限隔离、管理员升降级(防自锁)、健康状态机、token 轮换、删除外键。
 
 测试通过环境变量隔离：`MAILCATCHER_DATA_DIR`（临时库）、`FORWARD_171_BASE`（指向内置 mock）。
 
@@ -29,29 +29,28 @@ curl -X POST http://localhost:3000/api/admin/register \
   -H 'Content-Type: application/json' \
   -d '{"email":"alice@apexin.ai","password":"secret1","confirmPassword":"secret1"}'
 # 成功 → { code:200 }；非 @apexin.ai / 两次密码不一致 / 重复邮箱 / 密码<6位 → { code:400 }
-# 注册即 member、无团队；注册后可用该邮箱登录（大小写不敏感）
+# 注册即 member；注册后可用该邮箱登录（大小写不敏感）
 ```
 
-### 1. 登录（默认 super_admin）
+### 1. 登录（默认管理员）
 
 ```bash
 curl -X POST http://localhost:3000/api/admin/login \
   -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"admin123"}'
-# → { code:200, data:{ accessToken, id, role:"super_admin", team_id, team_name } }
+# → { code:200, data:{ accessToken, id, role:"admin" } }
 ```
 
-### 2. 团队与用户
+### 2. 用户管理（仅 admin）
 
 ```bash
-# 建团队
-curl -X POST http://localhost:3000/api/admin/team/create \
+# 把注册用户升级为管理员（或降级，状态停用）；不能改自己
+curl -X PUT http://localhost:3000/api/admin/user/update \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"name":"研发一组"}'
-# 建用户（team_admin / member）
-curl -X POST http://localhost:3000/api/admin/user/create \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"username":"alice","password":"pass","role":"team_admin","team_id":2}'
+  -d '{"id":2,"role":"admin"}'
+# 重置密码 / 删除
+curl -X POST http://localhost:3000/api/admin/user/reset-password \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"id":2,"newPassword":"newpass"}'
 ```
 
 ### 3. 添加账号（两种来源）
@@ -83,7 +82,7 @@ curl -H "Authorization: Bearer $TOKEN_OR_APIKEY" \
 - 成功: `{code:200, message:"success", data:{code, subject, from, date}}`
 - 无新邮件: `{code:200, message:"no new message"}`
 - 令牌无效: `{code:401}`；账号封禁/停用: `{code:403}`
-- 按邮箱无身份: `{code:401}`；跨团队: `{code:403}`
+- 按邮箱无身份: `{code:401}`；账号封禁/停用: `{code:403}`
 
 ### 5. 个人 API Key
 
@@ -112,7 +111,7 @@ mailcatcher apikey                                  # 生成个人 API Key
 mailcatcher email add x@priest.com --source forward --forward-token <t>
 mailcatcher code <token> claude                     # 按令牌
 mailcatcher code x@priest.com claude                # 按邮箱（用 API Key）
-mailcatcher email list / team list / user list
+mailcatcher email list / user list
 mailcatcher email status 1 banned / email rotate 1
 ```
 
@@ -121,5 +120,5 @@ mailcatcher email status 1 banned / email rotate 1
 1. 打开 http://localhost:3000 → 「在线接码」：登录后可"按邮箱"选账号取码；或"按令牌"。
 2. 「管理登录」admin / admin123。
 3. 账号管理：来源(self/forward)切换、状态变更、领用/释放、token 轮换、批量导入(self)。
-4. 团队管理（super_admin）、用户管理（admin）、个人(API Key/改密)、服务配置、查询日志。
-5. 验证隔离：team_admin/member 登录后只能看到本团队账号与日志。
+4. 用户管理（admin：升降级角色/重置密码/删除）、个人(API Key/改密)、服务配置、查询日志。
+5. 验证角色：member 登录后只见「在线接码 + 账号管理」，账号页无增删改按钮，不能访问用户/日志接口。

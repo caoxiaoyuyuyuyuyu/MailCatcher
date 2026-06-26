@@ -265,21 +265,6 @@ async function cmdEmailRotate(args, flags) {
   console.log(`New token (shown once): ${r.data.token}`);
 }
 
-async function cmdTeamList(args, flags) {
-  const server = getServer(flags);
-  const adminToken = getAdminToken(flags);
-  if (!adminToken) die('Not logged in. Run: mailcatcher login <user> <pass>');
-  const r = await api(server, 'GET', '/api/admin/team/list', null, adminToken);
-  if (r.code !== 200) die(r.message || 'Failed');
-  if (flags.json) { out(r.data, true); return; }
-  table(r.data.list, [
-    { key: 'id', label: 'ID', max: 5 },
-    { key: 'name', label: 'Team', max: 20 },
-    { key: 'member_count', label: 'Members', max: 8 },
-    { key: 'account_count', label: 'Accounts', max: 9 },
-  ]);
-}
-
 async function cmdUserList(args, flags) {
   const server = getServer(flags);
   const adminToken = getAdminToken(flags);
@@ -289,9 +274,8 @@ async function cmdUserList(args, flags) {
   if (flags.json) { out(r.data, true); return; }
   table(r.data.list, [
     { key: 'id', label: 'ID', max: 5 },
-    { key: 'username', label: 'User', max: 18 },
-    { key: 'role', label: 'Role', max: 12 },
-    { key: 'team_name', label: 'Team', max: 16 },
+    { key: 'username', label: 'User', max: 22 },
+    { key: 'role', label: 'Role', max: 8 },
     { key: 'status', label: 'On', max: 3 },
   ]);
 }
@@ -462,7 +446,6 @@ ADMIN (requires login)
   email import <file|->                   Batch import self accounts (email----pass----appkey)
   email test <addr> <pass>                Test IMAP connection
 
-  team list                   List teams (super_admin)
   user list                   List users (admin)
   server list / add / delete  IMAP server configs
   log list / clear            Query logs
@@ -507,7 +490,6 @@ async function main() {
     'email.test':     () => cmdEmailTest(rest, flags),
     'email.status':   () => cmdEmailStatus(rest, flags),
     'email.rotate':   () => cmdEmailRotate(rest, flags),
-    'team.list':      () => cmdTeamList(rest, flags),
     'user.list':      () => cmdUserList(rest, flags),
     'server.list':    () => cmdServerList(rest, flags),
     'server.add':     () => cmdServerAdd(rest, flags),
@@ -519,7 +501,7 @@ async function main() {
   const compoundKey = sub ? `${cmd}.${sub}` : null;
   const handler = (compoundKey && routes[compoundKey]) || routes[cmd];
   if (!handler) {
-    if (['email', 'server', 'log', 'team', 'user'].includes(cmd)) {
+    if (['email', 'server', 'log', 'user'].includes(cmd)) {
       die(`Unknown subcommand: ${cmd} ${sub || ''}\nRun: mailcatcher help`);
     }
     die(`Unknown command: ${cmd}\nRun: mailcatcher help`);

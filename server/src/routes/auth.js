@@ -7,22 +7,20 @@ import { generateApiToken, hashToken } from '../services/crypto.js';
 const router = Router();
 
 function ensureDefaultAdmin() {
-  const admin = db.prepare('SELECT id, role FROM users WHERE username = ?').get('admin');
+  const admin = db.prepare('SELECT id FROM users WHERE username = ?').get('admin');
   if (!admin) {
-    const hash = bcrypt.hashSync('admin123', 10);
-    db.prepare('INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)')
-      .run('admin', hash, 'super_admin');
-  } else if (admin.role === 'admin') {
-    // 旧库：把历史 admin 角色升级为 super_admin
-    db.prepare("UPDATE users SET role = 'super_admin' WHERE id = ?").run(admin.id);
+    db.prepare('INSERT INTO users (username, password_hash, role, status) VALUES (?, ?, ?, 1)')
+      .run('admin', bcrypt.hashSync('admin123', 10), 'admin');
   }
+  // 历史三级角色统一为 admin（去团队后只有 admin / member）
+  db.prepare("UPDATE users SET role = 'admin' WHERE role IN ('super_admin', 'team_admin')").run();
 }
 ensureDefaultAdmin();
 
 // 允许注册的邮箱后缀（可用环境变量覆盖，默认公司域名）
 const ALLOWED_EMAIL_SUFFIX = (process.env.REGISTER_EMAIL_SUFFIX || '@apexin.ai').toLowerCase();
 
-// 自助注册：邮箱(限定后缀) + 密码二次确认。注册即为 member，团队由管理员后续在用户管理中分配。
+// 自助注册：邮箱(限定后缀) + 密码二次确认。注册即为 member，由管理员后续按需升级。
 router.post('/register', (req, res) => {
   const email = (req.body.email || '').trim().toLowerCase();
   const { password, confirmPassword } = req.body;
@@ -35,9 +33,8 @@ router.post('/register', (req, res) => {
   }
   if (String(password).length < 6) return res.json({ code: 400, message: '密码至少 6 位' });
   try {
-    const hash = bcrypt.hashSync(password, 10);
-    db.prepare('INSERT INTO users (username, password_hash, role, team_id, status) VALUES (?, ?, ?, NULL, 1)')
-      .run(email, hash, 'member');
+    db.prepare('INSERT INTO users (username, password_hash, role, status) VALUES (?, ?, ?, 1)')
+      .run(email, bcrypt.hashSync(password, 10), 'member');
     res.json({ code: 200, message: '注册成功，请登录' });
   } catch (err) {
     if (err.message.includes('UNIQUE')) return res.json({ code: 400, message: '该邮箱已注册' });
@@ -59,28 +56,18 @@ router.post('/login', (req, res) => {
   if (user.status === 0) {
     return res.json({ code: 403, message: '该账号已被停用' });
   }
-  const token = generateToken(user);
-  const team = user.team_id ? db.prepare('SELECT name FROM teams WHERE id = ?').get(user.team_id) : null;
   res.json({
     code: 200,
-    data: {
-      accessToken: token,
-      id: user.id,
-      username: user.username,
-      role: user.role,
-      team_id: user.team_id ?? null,
-      team_name: team?.name ?? null,
-    },
+    data: { accessToken: generateToken(user), id: user.id, username: user.username, role: user.role },
     message: 'success',
   });
 });
 
 router.get('/me', authMiddleware, (req, res) => {
-  const user = db.prepare('SELECT id, username, role, team_id, status, api_key_hash FROM users WHERE id = ?').get(req.user.id);
+  const user = db.prepare('SELECT id, username, role, status, api_key_hash FROM users WHERE id = ?').get(req.user.id);
   if (!user) return res.json({ code: 401, message: '用户不存在' });
-  const team = user.team_id ? db.prepare('SELECT name FROM teams WHERE id = ?').get(user.team_id) : null;
   const { api_key_hash, ...safe } = user;
-  res.json({ code: 200, data: { ...safe, team_name: team?.name ?? null, has_api_key: !!api_key_hash }, message: 'success' });
+  res.json({ code: 200, data: { ...safe, has_api_key: !!api_key_hash }, message: 'success' });
 });
 
 // 自助生成/重置个人 API Key（用于 CLI/Agent 按邮箱取码）；明文仅此一次返回
@@ -96,8 +83,7 @@ router.post('/change-password', authMiddleware, (req, res) => {
   if (!user || !bcrypt.compareSync(oldPassword, user.password_hash)) {
     return res.json({ code: 400, message: '原密码错误' });
   }
-  const hash = bcrypt.hashSync(newPassword, 10);
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, user.id);
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(newPassword, 10), user.id);
   res.json({ code: 200, message: 'success' });
 });
 

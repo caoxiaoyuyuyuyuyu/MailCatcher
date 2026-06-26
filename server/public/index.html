@@ -45,20 +45,18 @@
     <div class="nav">
       <div class="nav-item" :class="{active: page==='code'}" @click="go('code')">在线接码</div>
       <template v-if="isLoggedIn">
-        <div v-if="isManager" class="nav-item" :class="{active: page==='dashboard'}" @click="go('dashboard')">控制台</div>
+        <div v-if="isAdmin" class="nav-item" :class="{active: page==='dashboard'}" @click="go('dashboard')">控制台</div>
         <div class="nav-item" :class="{active: page==='accounts'}" @click="go('accounts')">账号管理</div>
-        <div v-if="isSuper" class="nav-item" :class="{active: page==='teams'}" @click="go('teams')">团队管理</div>
-        <div v-if="canManageUsers" class="nav-item" :class="{active: page==='users'}" @click="go('users')">用户管理</div>
-        <div v-if="isManager" class="nav-item" :class="{active: page==='servers'}" @click="go('servers')">服务配置</div>
-        <div v-if="isManager" class="nav-item" :class="{active: page==='logs'}" @click="go('logs')">查询日志</div>
-        <div v-if="isManager" class="nav-item" :class="{active: page==='profile'}" @click="go('profile')">个人</div>
+        <div v-if="isAdmin" class="nav-item" :class="{active: page==='users'}" @click="go('users')">用户管理</div>
+        <div v-if="isAdmin" class="nav-item" :class="{active: page==='servers'}" @click="go('servers')">服务配置</div>
+        <div v-if="isAdmin" class="nav-item" :class="{active: page==='logs'}" @click="go('logs')">查询日志</div>
+        <div v-if="isAdmin" class="nav-item" :class="{active: page==='profile'}" @click="go('profile')">个人</div>
       </template>
     </div>
     <div class="spacer"></div>
     <template v-if="isLoggedIn">
       <span style="margin-right:12px;font-size:14px;color:#606266">{{ me.username }}
         <el-tag size="small" :type="roleTag(me.role).type" style="margin-left:4px">{{ roleTag(me.role).label }}</el-tag>
-        <span v-if="me.team_name" style="margin-left:4px;color:#909399">@{{ me.team_name }}</span>
       </span>
       <el-button size="small" @click="logout">退出</el-button>
     </template>
@@ -79,7 +77,7 @@
       <el-form label-position="top">
         <el-form-item v-if="codeForm.mode==='email'" label="邮箱账号">
           <el-select v-model="codeForm.email" filterable allow-create default-first-option
-            placeholder="选择或输入本团队账号邮箱" size="large" style="width:100%" @focus="ensureAccountsLoaded">
+            placeholder="选择或输入账号邮箱" size="large" style="width:100%" @focus="ensureAccountsLoaded">
             <el-option v-for="a in accountList" :key="a.id" :label="a.address" :value="a.address"></el-option>
           </el-select>
         </el-form-item>
@@ -133,8 +131,7 @@
     <!-- 控制台 -->
     <div v-if="page==='dashboard' && isLoggedIn">
       <div class="stat-cards">
-        <div class="stat-card"><div class="label">账号数量{{ isSuper ? '' : '（本团队）' }}</div><div class="value">{{ stats.emails || 0 }}</div></div>
-        <div v-if="isSuper" class="stat-card"><div class="label">团队数量</div><div class="value">{{ stats.teams || 0 }}</div></div>
+        <div class="stat-card"><div class="label">账号数量</div><div class="value">{{ stats.emails || 0 }}</div></div>
         <div class="stat-card"><div class="label">服务配置</div><div class="value">{{ stats.servers || 0 }}</div></div>
         <div class="stat-card"><div class="label">查询总数</div><div class="value">{{ stats.logs || 0 }}</div></div>
         <div class="stat-card"><div class="label">成功查询</div><div class="value">{{ stats.successLogs || 0 }}</div></div>
@@ -153,12 +150,14 @@
           <el-option v-for="h in healthOptions" :key="h.value" :label="h.label" :value="h.value"></el-option>
         </el-select>
         <el-button type="primary" @click="loadAccounts">搜索</el-button>
-        <el-button type="success" @click="showAddAccount">添加账号</el-button>
-        <el-button type="warning" @click="showImport">批量导入(自管)</el-button>
-        <el-button type="danger" @click="deleteSelectedAccounts" :disabled="!selectedAccounts.length">批量删除</el-button>
+        <template v-if="isAdmin">
+          <el-button type="success" @click="showAddAccount">添加账号</el-button>
+          <el-button type="warning" @click="showImport">批量导入(自管)</el-button>
+          <el-button type="danger" @click="deleteSelectedAccounts" :disabled="!selectedAccounts.length">批量删除</el-button>
+        </template>
       </div>
       <el-table :data="accountList" border stripe @selection-change="v => selectedAccounts = v" max-height="560">
-        <el-table-column type="selection" width="42"></el-table-column>
+        <el-table-column v-if="isAdmin" type="selection" width="42"></el-table-column>
         <el-table-column prop="address" label="邮箱地址" min-width="190" show-overflow-tooltip></el-table-column>
         <el-table-column label="来源" width="90" align="center">
           <template #default="{row}"><el-tag size="small" :type="row.source==='forward'?'warning':'primary'">{{ row.source==='forward'?'171mail':'自管' }}</el-tag></template>
@@ -166,7 +165,7 @@
         <el-table-column label="令牌" width="150">
           <template #default="{row}">
             <span class="hint">{{ row.token_prefix || '—' }}</span>
-            <el-button link size="small" @click="rotateToken(row)">轮换</el-button>
+            <el-button v-if="isAdmin" link size="small" @click="rotateToken(row)">轮换</el-button>
           </template>
         </el-table-column>
         <el-table-column label="健康状态" width="110" align="center">
@@ -175,18 +174,17 @@
         <el-table-column label="领用人" width="120" align="center">
           <template #default="{row}"><span v-if="row.assignee_name">{{ row.assignee_name }}</span><span v-else class="hint">空闲</span></template>
         </el-table-column>
-        <el-table-column v-if="isSuper" prop="team_name" label="团队" width="110"></el-table-column>
         <el-table-column label="启用" width="70" align="center">
           <template #default="{row}"><el-tag size="small" :type="row.status===1?'success':'info'">{{ row.status===1?'是':'否' }}</el-tag></template>
         </el-table-column>
-        <el-table-column label="操作" width="300" align="center">
+        <el-table-column label="操作" width="280" align="center">
           <template #default="{row}">
-            <el-button link size="small" type="primary" @click="editAccount(row)">编辑</el-button>
-            <el-button link size="small" @click="showStatus(row)">状态</el-button>
+            <el-button v-if="isAdmin" link size="small" type="primary" @click="editAccount(row)">编辑</el-button>
+            <el-button v-if="isAdmin" link size="small" @click="showStatus(row)">状态</el-button>
             <el-button v-if="!row.assignee_id" link size="small" type="success" @click="claim(row)">领用</el-button>
-            <el-button v-else-if="row.assignee_id===me.id || isManager" link size="small" type="warning" @click="release(row)">释放</el-button>
+            <el-button v-else-if="row.assignee_id===me.id || isAdmin" link size="small" type="warning" @click="release(row)">释放</el-button>
             <el-button link size="small" @click="fetchFromRow(row)">取码</el-button>
-            <el-button link size="small" type="danger" @click="deleteAccount(row.id)">删除</el-button>
+            <el-button v-if="isAdmin" link size="small" type="danger" @click="deleteAccount(row.id)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -195,49 +193,29 @@
       </div>
     </div>
 
-    <!-- 团队管理 -->
-    <div v-if="page==='teams' && isSuper" class="page-card">
-      <div class="page-title">团队管理</div>
-      <div class="toolbar"><el-button type="success" @click="showAddTeam">新建团队</el-button></div>
-      <el-table :data="teamList" border stripe>
-        <el-table-column prop="id" label="ID" width="60"></el-table-column>
-        <el-table-column prop="name" label="团队名称" min-width="160"></el-table-column>
-        <el-table-column prop="remark" label="备注" min-width="200" show-overflow-tooltip></el-table-column>
-        <el-table-column prop="member_count" label="成员数" width="90" align="center"></el-table-column>
-        <el-table-column prop="account_count" label="账号数" width="90" align="center"></el-table-column>
-        <el-table-column label="操作" width="150" align="center">
-          <template #default="{row}">
-            <el-button link size="small" type="primary" @click="editTeam(row)">编辑</el-button>
-            <el-button link size="small" type="danger" @click="deleteTeam(row.id)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </div>
-
     <!-- 用户管理 -->
-    <div v-if="page==='users' && canManageUsers" class="page-card">
+    <div v-if="page==='users' && isAdmin" class="page-card">
       <div class="page-title">用户管理</div>
       <div class="toolbar">
         <el-input v-model="userSearch" placeholder="搜索用户名/邮箱" style="width:200px" clearable @clear="loadUsers" @keyup.enter="loadUsers"></el-input>
         <el-button type="primary" @click="loadUsers">搜索</el-button>
-        <span class="hint" style="margin-left:8px">用户通过注册页自助注册，此处分配团队/角色</span>
+        <span class="hint" style="margin-left:8px">用户通过注册页自助注册，此处管理角色/状态</span>
       </div>
       <el-table :data="userList" border stripe>
         <el-table-column prop="id" label="ID" width="60"></el-table-column>
-        <el-table-column prop="username" label="用户名" min-width="140"></el-table-column>
+        <el-table-column prop="username" label="用户名" min-width="180"></el-table-column>
         <el-table-column label="角色" width="120" align="center">
           <template #default="{row}"><el-tag size="small" :type="roleTag(row.role).type">{{ roleTag(row.role).label }}</el-tag></template>
         </el-table-column>
-        <el-table-column prop="team_name" label="团队" width="120"></el-table-column>
         <el-table-column label="API Key" width="100" align="center">
           <template #default="{row}"><el-tag size="small" :type="row.has_api_key?'success':'info'">{{ row.has_api_key?'已设':'未设' }}</el-tag></template>
         </el-table-column>
         <el-table-column label="状态" width="80" align="center">
           <template #default="{row}"><el-tag size="small" :type="row.status===1?'success':'danger'">{{ row.status===1?'正常':'停用' }}</el-tag></template>
         </el-table-column>
-        <el-table-column label="操作" width="200" align="center">
+        <el-table-column label="操作" width="220" align="center">
           <template #default="{row}">
-            <el-button link size="small" type="primary" @click="editUser(row)">编辑</el-button>
+            <el-button v-if="row.id!==me.id" link size="small" type="primary" @click="editUser(row)">编辑</el-button>
             <el-button link size="small" @click="resetUserPwd(row)">重置密码</el-button>
             <el-button v-if="row.id!==me.id" link size="small" type="danger" @click="deleteUser(row.id)">删除</el-button>
           </template>
@@ -246,7 +224,7 @@
     </div>
 
     <!-- 服务配置 -->
-    <div v-if="page==='servers' && isLoggedIn" class="page-card">
+    <div v-if="page==='servers' && isAdmin" class="page-card">
       <div class="page-title">邮件服务配置</div>
       <div class="toolbar">
         <el-input v-model="serverSearch" placeholder="搜索域名/地址" style="width:220px" clearable @clear="loadServers" @keyup.enter="loadServers"></el-input>
@@ -270,12 +248,12 @@
     </div>
 
     <!-- 查询日志 -->
-    <div v-if="page==='logs' && isLoggedIn" class="page-card">
-      <div class="page-title">查询日志{{ isSuper ? '' : '（本团队）' }}</div>
+    <div v-if="page==='logs' && isAdmin" class="page-card">
+      <div class="page-title">查询日志</div>
       <div class="toolbar">
         <el-input v-model="logSearch" placeholder="搜索邮箱/类型" style="width:220px" clearable @clear="loadLogs" @keyup.enter="loadLogs"></el-input>
         <el-button type="primary" @click="loadLogs">搜索</el-button>
-        <el-button v-if="isSuper" type="danger" @click="clearLogs">清空日志</el-button>
+        <el-button type="danger" @click="clearLogs">清空日志</el-button>
       </div>
       <el-table :data="logList" border stripe max-height="500">
         <el-table-column prop="id" label="ID" width="60"></el-table-column>
@@ -298,7 +276,6 @@
       <el-descriptions :column="1" border style="margin-bottom:24px">
         <el-descriptions-item label="用户名">{{ me.username }}</el-descriptions-item>
         <el-descriptions-item label="角色">{{ roleTag(me.role).label }}</el-descriptions-item>
-        <el-descriptions-item label="团队">{{ me.team_name || '—' }}</el-descriptions-item>
       </el-descriptions>
       <h3 style="margin-bottom:8px;font-size:15px">API Key（用于 CLI / 脚本按邮箱接码）</h3>
       <p class="hint" style="margin-bottom:8px">状态：{{ me.has_api_key ? '已设置' : '未设置' }}。重置后旧 Key 立即失效，新 Key 仅显示一次。</p>
@@ -330,11 +307,6 @@
         <el-form-item label="上游"><el-input v-model="accForm.forward_provider" placeholder="171mail"></el-input></el-form-item>
         <el-form-item label="上游令牌" :required="!accForm.id"><el-input v-model="accForm.forward_token" :placeholder="accForm.id?'留空则不修改':'171mail 的 token'"></el-input></el-form-item>
       </template>
-      <el-form-item v-if="isSuper" label="团队">
-        <el-select v-model="accForm.team_id" placeholder="选择团队" style="width:100%">
-          <el-option v-for="t in teamList" :key="t.id" :label="t.name" :value="t.id"></el-option>
-        </el-select>
-      </el-form-item>
       <el-form-item v-if="accForm.id" label="启用"><el-switch v-model="accForm.status" :active-value="1" :inactive-value="0"></el-switch></el-form-item>
     </el-form>
     <template #footer><el-button @click="accDialog=false">取消</el-button><el-button type="primary" :loading="accSaving" @click="saveAccount">保存</el-button></template>
@@ -349,31 +321,17 @@
     <template #footer><el-button @click="statusDialog=false">取消</el-button><el-button type="primary" @click="saveStatus">确定</el-button></template>
   </el-dialog>
 
-  <!-- 团队 新增/编辑 -->
-  <el-dialog v-model="teamDialog" :title="teamForm.id ? '编辑团队' : '新建团队'" width="440px">
+  <!-- 用户 编辑（角色 / 状态）-->
+  <el-dialog v-model="userDialog" title="编辑用户" width="420px">
     <el-form label-width="80px">
-      <el-form-item label="名称" required><el-input v-model="teamForm.name"></el-input></el-form-item>
-      <el-form-item label="备注"><el-input v-model="teamForm.remark"></el-input></el-form-item>
-    </el-form>
-    <template #footer><el-button @click="teamDialog=false">取消</el-button><el-button type="primary" @click="saveTeam">保存</el-button></template>
-  </el-dialog>
-
-  <!-- 用户 新增/编辑 -->
-  <el-dialog v-model="userDialog" :title="userForm.id ? '编辑用户' : '新建用户'" width="440px">
-    <el-form label-width="80px">
-      <el-form-item label="用户名" required><el-input v-model="userForm.username" :disabled="!!userForm.id"></el-input></el-form-item>
-      <el-form-item v-if="!userForm.id" label="密码" required><el-input v-model="userForm.password" type="password" show-password></el-input></el-form-item>
+      <el-form-item label="用户名"><el-input v-model="userForm.username" disabled></el-input></el-form-item>
       <el-form-item label="角色">
-        <el-select v-model="userForm.role" style="width:100%" @change="onRoleChange">
-          <el-option v-if="isSuper" label="超级管理员" value="super_admin"></el-option>
-          <el-option v-if="isSuper" label="团队管理员" value="team_admin"></el-option>
+        <el-select v-model="userForm.role" style="width:100%">
+          <el-option label="管理员" value="admin"></el-option>
           <el-option label="成员" value="member"></el-option>
         </el-select>
       </el-form-item>
-      <el-form-item v-if="isSuper && userForm.role!=='super_admin'" label="团队">
-        <el-select v-model="userForm.team_id" style="width:100%"><el-option v-for="t in teamList" :key="t.id" :label="t.name" :value="t.id"></el-option></el-select>
-      </el-form-item>
-      <el-form-item v-if="userForm.id" label="状态"><el-switch v-model="userForm.status" :active-value="1" :inactive-value="0"></el-switch></el-form-item>
+      <el-form-item label="状态"><el-switch v-model="userForm.status" :active-value="1" :inactive-value="0"></el-switch></el-form-item>
     </el-form>
     <template #footer><el-button @click="userDialog=false">取消</el-button><el-button type="primary" @click="saveUser">保存</el-button></template>
   </el-dialog>
@@ -425,9 +383,7 @@ createApp({
     const token = ref(localStorage.getItem('mc_token') || '');
     const me = reactive(JSON.parse(localStorage.getItem('mc_me') || '{}'));
     const isLoggedIn = computed(() => !!token.value);
-    const isSuper = computed(() => me.role === 'super_admin');
-    const isManager = computed(() => me.role === 'super_admin' || me.role === 'team_admin');
-    const canManageUsers = computed(() => isManager.value);
+    const isAdmin = computed(() => me.role === 'admin');
 
     async function api(method, url, data) {
       const headers = { 'Content-Type': 'application/json' };
@@ -441,7 +397,7 @@ createApp({
     const ok = (r, msg) => { if (r.code === 200) { if (msg) ElMessage.success(msg); return true; } ElMessage.error(r.message || '操作失败'); return false; };
 
     function roleTag(role) {
-      return { super_admin: { label: '超管', type: 'danger' }, team_admin: { label: '团队管理', type: 'warning' }, member: { label: '成员', type: 'info' } }[role] || { label: role, type: 'info' };
+      return { admin: { label: '管理员', type: 'danger' }, member: { label: '成员', type: 'info' } }[role] || { label: role, type: 'info' };
     }
     const healthOptions = [
       { value: 'active', label: '正常' }, { value: 'error', label: '异常' },
@@ -461,11 +417,11 @@ createApp({
         const r = await api('POST', '/api/admin/login', loginForm);
         if (r.code === 200) {
           token.value = r.data.accessToken;
-          Object.assign(me, { id: r.data.id, username: r.data.username, role: r.data.role, team_id: r.data.team_id, team_name: r.data.team_name });
+          Object.assign(me, { id: r.data.id, username: r.data.username, role: r.data.role });
           localStorage.setItem('mc_token', token.value);
           persistMe();
           await loadMe();
-          page.value = isManager.value ? 'dashboard' : 'accounts'; // 成员直接进账号管理
+          page.value = isAdmin.value ? 'dashboard' : 'accounts'; // 成员直接进账号管理
           ElMessage.success('登录成功');
         } else ElMessage.error(r.message);
       } finally { loginLoading.value = false; }
@@ -505,7 +461,7 @@ createApp({
     // ── Code fetching ──
     const codeForm = reactive({ mode: token.value ? 'email' : 'token', token: '', email: '', type: 'gpt' });
     const codeTypes = [
-      { label: 'ChatGPT', value: 'gpt' }, { label: 'Claude', value: 'claude' }, { label: 'Google', value: 'google' },
+      { label: 'ChatGPT / Codex', value: 'gpt' }, { label: 'Claude', value: 'claude' }, { label: 'Google', value: 'google' },
       { label: 'Telegram', value: 'telegram' }, { label: 'Grok', value: 'grok' }, { label: 'Chipper', value: 'chipper' }, { label: '全部', value: 'all' },
     ];
     const codeLoading = ref(false), codeResult = ref(''), codeResultType = ref('info');
@@ -541,7 +497,7 @@ createApp({
     const accSearch = ref(''), accSourceFilter = ref(''), accHealthFilter = ref('');
     const selectedAccounts = ref([]);
     const accDialog = ref(false), accSaving = ref(false);
-    const accForm = reactive({ id: null, source: 'self', address: '', password: '', appkey: '', forward_provider: '171mail', forward_token: '', team_id: null, status: 1 });
+    const accForm = reactive({ id: null, source: 'self', address: '', password: '', appkey: '', forward_provider: '171mail', forward_token: '', status: 1 });
     let accountsLoaded = false;
     async function loadAccounts() {
       const q = `page=${accPage.value}&pageSize=30&keyword=${encodeURIComponent(accSearch.value)}&source=${accSourceFilter.value}&health=${accHealthFilter.value}`;
@@ -550,13 +506,11 @@ createApp({
     }
     function ensureAccountsLoaded() { if (!accountsLoaded && isLoggedIn.value) loadAccounts(); }
     function showAddAccount() {
-      Object.assign(accForm, { id: null, source: 'self', address: '', password: '', appkey: '', forward_provider: '171mail', forward_token: '', team_id: me.team_id || null, status: 1 });
-      if (isSuper.value) loadTeams();
+      Object.assign(accForm, { id: null, source: 'self', address: '', password: '', appkey: '', forward_provider: '171mail', forward_token: '', status: 1 });
       accDialog.value = true;
     }
     function editAccount(row) {
-      Object.assign(accForm, { id: row.id, source: row.source, address: row.address, password: '', appkey: row.appkey, forward_provider: row.forward_provider || '171mail', forward_token: '', team_id: row.team_id, status: row.status });
-      if (isSuper.value) loadTeams();
+      Object.assign(accForm, { id: row.id, source: row.source, address: row.address, password: '', appkey: row.appkey, forward_provider: row.forward_provider || '171mail', forward_token: '', status: row.status });
       accDialog.value = true;
     }
     async function saveAccount() {
@@ -611,7 +565,7 @@ createApp({
       if (!lines.length) { ElMessage.warning('请输入数据'); return; }
       importLoading.value = true;
       try {
-        const r = await api('POST', '/api/admin/email/import', { emails: lines, team_id: accForm.team_id });
+        const r = await api('POST', '/api/admin/email/import', { emails: lines });
         if (r.code === 200) { importDialog.value = false; loadAccounts(); showSecret(`成功导入 ${r.data.imported} 个账号 — 各账号令牌`, '', r.data.tokens || []); }
         else ElMessage.error(r.message);
       } finally { importLoading.value = false; }
@@ -621,31 +575,14 @@ createApp({
     const secretDialog = reactive({ show: false, title: '', value: '', list: [] });
     function showSecret(title, value, list = []) { Object.assign(secretDialog, { show: true, title, value, list }); }
 
-    // ── Teams ──
-    const teamList = ref([]);
-    async function loadTeams() { const r = await api('GET', '/api/admin/team/list'); if (r.code === 200) teamList.value = r.data.list; }
-    const teamDialog = ref(false), teamForm = reactive({ id: null, name: '', remark: '' });
-    function showAddTeam() { Object.assign(teamForm, { id: null, name: '', remark: '' }); teamDialog.value = true; }
-    function editTeam(row) { Object.assign(teamForm, { id: row.id, name: row.name, remark: row.remark }); teamDialog.value = true; }
-    async function saveTeam() {
-      const r = await api(teamForm.id ? 'PUT' : 'POST', teamForm.id ? '/api/admin/team/update' : '/api/admin/team/create', teamForm);
-      if (ok(r, '保存成功')) { teamDialog.value = false; loadTeams(); }
-    }
-    async function deleteTeam(id) {
-      if (!await confirmDanger('确定删除该团队？', '删除团队', '删除')) return;
-      if (ok(await api('DELETE', '/api/admin/team/delete/' + id))) loadTeams();
-    }
-
-    // ── Users ──
+    // ── Users（管理员）──
     const userList = ref([]), userSearch = ref('');
     async function loadUsers() { const r = await api('GET', '/api/admin/user/list?keyword=' + encodeURIComponent(userSearch.value)); if (r.code === 200) userList.value = r.data.list; }
     const userDialog = ref(false);
-    const userForm = reactive({ id: null, username: '', password: '', role: 'member', team_id: null, status: 1 });
-    function onRoleChange() { if (userForm.role === 'super_admin') userForm.team_id = null; }
-    function showAddUser() { Object.assign(userForm, { id: null, username: '', password: '', role: 'member', team_id: isSuper.value ? null : me.team_id, status: 1 }); if (isSuper.value) loadTeams(); userDialog.value = true; }
-    function editUser(row) { Object.assign(userForm, { id: row.id, username: row.username, password: '', role: row.role, team_id: row.team_id, status: row.status }); if (isSuper.value) loadTeams(); userDialog.value = true; }
+    const userForm = reactive({ id: null, username: '', role: 'member', status: 1 });
+    function editUser(row) { Object.assign(userForm, { id: row.id, username: row.username, role: row.role, status: row.status }); userDialog.value = true; }
     async function saveUser() {
-      const r = await api(userForm.id ? 'PUT' : 'POST', userForm.id ? '/api/admin/user/update' : '/api/admin/user/create', userForm);
+      const r = await api('PUT', '/api/admin/user/update', { id: userForm.id, role: userForm.role, status: userForm.status });
       if (ok(r, '保存成功')) { userDialog.value = false; loadUsers(); }
     }
     async function resetUserPwd(row) {
@@ -695,7 +632,6 @@ createApp({
     watch(page, (p) => {
       if (p === 'dashboard') loadStats();
       if (p === 'accounts') loadAccounts();
-      if (p === 'teams') loadTeams();
       if (p === 'users') loadUsers();
       if (p === 'servers') loadServers();
       if (p === 'logs') loadLogs();
@@ -703,7 +639,7 @@ createApp({
     onMounted(() => { if (isLoggedIn.value) { loadMe(); loadStats(); } });
 
     return {
-      page, go, token, me, isLoggedIn, isSuper, isManager, canManageUsers, roleTag,
+      page, go, token, me, isLoggedIn, isAdmin, roleTag,
       healthOptions, healthLabel, healthTag,
       loginForm, loginLoading, doLogin, logout,
       registerForm, registerLoading, doRegister,
@@ -714,8 +650,7 @@ createApp({
       statusDialog, statusForm, showStatus, saveStatus,
       importDialog, importText, importLoading, showImport, doImport,
       secretDialog,
-      teamList, teamDialog, teamForm, showAddTeam, editTeam, saveTeam, deleteTeam,
-      userList, userSearch, loadUsers, userDialog, userForm, onRoleChange, showAddUser, editUser, saveUser, resetUserPwd, deleteUser,
+      userList, userSearch, loadUsers, userDialog, userForm, editUser, saveUser, resetUserPwd, deleteUser,
       pwdForm, changePwd, genApiKey,
       serverList, serverSearch, serverDialog, serverSaving, serverForm, loadServers, showAddServer, editServer, saveServer, deleteServer,
       logList, logTotal, logPage, logSearch, loadLogs, clearLogs,

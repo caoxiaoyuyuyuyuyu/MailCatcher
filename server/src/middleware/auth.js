@@ -9,7 +9,7 @@ if (!process.env.JWT_SECRET) {
 
 export function generateToken(user) {
   return jwt.sign(
-    { id: user.id, username: user.username, role: user.role, team_id: user.team_id ?? null },
+    { id: user.id, username: user.username, role: user.role },
     JWT_SECRET,
     { expiresIn: '7d' }
   );
@@ -28,7 +28,7 @@ export function authMiddleware(req, res, next) {
   }
 }
 
-// 角色门禁：requireRole('super_admin') / requireRole('super_admin','team_admin')
+// 角色门禁。单团队模型只有两种角色：admin / member
 export function requireRole(...roles) {
   return (req, res, next) => {
     if (!req.user || !roles.includes(req.user.role)) {
@@ -38,17 +38,9 @@ export function requireRole(...roles) {
   };
 }
 
-export const isSuper = (req) => req.user?.role === 'super_admin';
-
-// 团队隔离辅助：super_admin 不受限；其余仅限本团队。
-// 返回 { clause, params }，用于拼接到 WHERE 后（clause 形如 "AND team_id = ?"）。
-export function teamScope(req, column = 'team_id') {
-  if (isSuper(req)) return { clause: '', params: [] };
-  return { clause: ` AND ${column} = ?`, params: [req.user.team_id ?? -1] };
-}
+export const isAdmin = (req) => req.user?.role === 'admin';
 
 // 解析调用者身份：Bearer 既可是登录 JWT，也可是用户 API Key（按邮箱接码用）。
-// 返回 { id, username, role, team_id } 或 null。
 export function resolvePrincipal(req) {
   const h = req.headers.authorization;
   if (!h || !h.startsWith('Bearer ')) return null;
@@ -57,7 +49,7 @@ export function resolvePrincipal(req) {
     return jwt.verify(cred, JWT_SECRET);
   } catch {}
   const u = db.prepare(
-    'SELECT id, username, role, team_id, status FROM users WHERE api_key_hash IS NOT NULL AND api_key_hash = ?'
+    'SELECT id, username, role, status FROM users WHERE api_key_hash IS NOT NULL AND api_key_hash = ?'
   ).get(hashToken(cred));
   if (u && u.status !== 0) return u;
   return null;

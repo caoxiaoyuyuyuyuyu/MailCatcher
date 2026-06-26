@@ -13,10 +13,10 @@ const BLOCKED_HEALTH = new Set(['banned', 'expired', 'disabled']);
 function logQuery(account, label, type, result, success, errorMsg, requestedBy) {
   db.prepare(
     `INSERT INTO email_logs
-       (email_id, email_address, team_id, requested_by, query_type, query_token, subject, code, raw_body, success, error_msg)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       (email_id, email_address, requested_by, query_type, query_token, subject, code, raw_body, success, error_msg)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
-    account.id, account.address, account.team_id || null, requestedBy || null, type,
+    account.id, account.address, requestedBy || null, type,
     label,                                        // 仅存掩码/标识，不留明文令牌
     result?.subject || '',
     result?.code ? maskToken(result.code) : '',   // 验证码脱敏
@@ -70,7 +70,7 @@ async function runFetch(res, account, type, label, requestedBy) {
 // 接码：两种方式
 //   1) token 方式（无需登录）：?token=<我方签发的账号令牌>&type=
 //   2) 邮箱方式（需身份）：    ?email=<地址>&type=  + Authorization: Bearer <登录JWT 或 用户API Key>
-//      仅能取到本团队（super_admin 不限）的账号，保证隔离。
+//      单团队：登录用户均可对账号池中的邮箱取码。
 router.get('/', async (req, res) => {
   const { token, email, type = 'gpt' } = req.query;
 
@@ -85,8 +85,6 @@ router.get('/', async (req, res) => {
     if (!principal) return res.json({ code: 401, message: '按邮箱取码需登录或提供 API Key' });
     const account = db.prepare('SELECT * FROM emails WHERE address = ?').get(email);
     if (!account) return res.json({ code: 404, message: '账号不存在' });
-    const visible = principal.role === 'super_admin' || account.team_id === principal.team_id;
-    if (!visible) return res.json({ code: 403, message: '无权访问该账号' });
     return runFetch(res, account, type, account.token_prefix || '(email)', principal.id);
   }
 
