@@ -9,6 +9,8 @@ router.use(authMiddleware);
 
 const adminOnly = requireRole('admin'); // 账号管理（增删改/导入/状态/轮换）仅管理员
 const HEALTH = ['active', 'error', 'banned', 'expired', 'disabled'];
+// 兼容旧库遗留的 `token`(UNIQUE NOT NULL) 列：仍存在时，新建/导入要给它写值（写 token_hash，非明文）以满足约束
+const HAS_LEGACY_TOKEN = db.prepare('PRAGMA table_info(emails)').all().some(c => c.name === 'token');
 
 const getAccount = (id) => db.prepare('SELECT * FROM emails WHERE id = ?').get(id);
 function issueToken() {
@@ -60,19 +62,21 @@ router.post('/create', adminOnly, (req, res) => {
 
   const { token, token_hash, token_prefix } = issueToken();
   try {
-    const info = db.prepare(
-      `INSERT INTO emails
-         (address, source, appkey, batch_no, password_enc, fetch_address, forward_provider, forward_token_enc,
-          token_hash, token_prefix, health_status, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 1)`
-    ).run(
+    const cols = ['address', 'source', 'appkey', 'batch_no', 'password_enc', 'fetch_address',
+      'forward_provider', 'forward_token_enc', 'token_hash', 'token_prefix'];
+    const args = [
       address, source, appkey || '', batch_no || '',
       source === 'self' ? encrypt(password || '') : '',
       source === 'self' ? (fetch_address || '') : '',
       source === 'forward' ? forward_provider : '',
       source === 'forward' ? encrypt(forward_token) : '',
-      token_hash, token_prefix
-    );
+      token_hash, token_prefix,
+    ];
+    if (HAS_LEGACY_TOKEN) { cols.push('token'); args.push(token_hash); }
+    const ph = args.map(() => '?').join(', ');
+    const info = db.prepare(
+      `INSERT INTO emails (${cols.join(', ')}, health_status, status) VALUES (${ph}, 'active', 1)`
+    ).run(...args);
     res.json({ code: 200, data: { id: info.lastInsertRowid, token }, message: 'success' }); // token 仅此一次
   } catch (err) {
     if (err.message.includes('UNIQUE')) return res.json({ code: 400, message: '邮箱地址已存在' });
@@ -175,10 +179,10 @@ router.post('/import', adminOnly, (req, res) => {
   const { emails } = req.body;
   if (!emails?.length) return res.json({ code: 400, message: '导入数据为空' });
   const batch_no = `batch_${Date.now()}`;
+  const icols = ['address', 'password_enc', 'appkey', 'batch_no', 'token_hash', 'token_prefix'];
   const insert = db.prepare(
-    `INSERT OR IGNORE INTO emails
-       (address, source, password_enc, appkey, batch_no, token_hash, token_prefix, health_status, status)
-     VALUES (?, 'self', ?, ?, ?, ?, ?, 'active', 1)`
+    `INSERT OR IGNORE INTO emails (source, ${icols.join(', ')}${HAS_LEGACY_TOKEN ? ', token' : ''}, health_status, status)
+     VALUES ('self', ${icols.map(() => '?').join(', ')}${HAS_LEGACY_TOKEN ? ', ?' : ''}, 'active', 1)`
   );
   const results = [];
   db.transaction(() => {
@@ -192,7 +196,9 @@ router.post('/import', adminOnly, (req, res) => {
       }
       if (!address) continue;
       const { token, token_hash, token_prefix } = issueToken();
-      const r = insert.run(address, encrypt(password), appkey, batch_no, token_hash, token_prefix);
+      const a = [address, encrypt(password), appkey, batch_no, token_hash, token_prefix];
+      if (HAS_LEGACY_TOKEN) a.push(token_hash);
+      const r = insert.run(...a);
       if (r.changes > 0) results.push({ address, token });
     }
   })();

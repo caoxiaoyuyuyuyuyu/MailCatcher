@@ -28,3 +28,8 @@
 - **问题**：`email_logs.email_id` 外键引用 `emails(id)` 且 `foreign_keys=ON`。删除**有查询日志的账号**时 `DELETE FROM emails` 触发 `FOREIGN KEY constraint failed` → 500。测试只删了无日志的新账号，漏掉；生产 1913 条日志全引用账号，一删就炸。
 - **解决**：删除走事务——先 `UPDATE email_logs SET email_id=NULL`（保留审计、解除关联）+ 清 `account_status_logs`，再删账号；单删/批删/清空统一。补回归测试（删带日志账号）。
 - **避免**：删除有外键被引用的行前，先处理依赖（置空/级联/先删子表）；测试数据要**覆盖被引用的场景**，不能只测「干净」数据。已上线需 `systemctl restart`（后端改动，非静态文件）。
+
+### 6. 旧库遗留 `token` NOT NULL 列挡住新建账号（生产）
+- **问题**：新 schema 用 `token_hash`，但**生产旧表仍保留 `token TEXT UNIQUE NOT NULL`**（ALTER 只能增列，删不掉带约束的旧列）。新建账号不写 `token` → `NOT NULL constraint failed: emails.token`。`npm test` 用全新干净库（无此列）所以一直没暴露——又是「测试没覆盖旧库形态」。
+- **解决**：emails.js 启动时探测是否有遗留 `token` 列，有则在 create/import 给它写 `token_hash`（满足 NOT NULL+UNIQUE，非明文）。用**生产库副本**实测建账号通过。
+- **避免**：凡涉及"旧库升级路径"的改动，务必拿**生产库副本**跑一遍，别只信全新库测试。彻底根治需重建表删掉遗留明文列（带 FK + UNIQUE，需谨慎，留作后续）。
