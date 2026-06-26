@@ -168,9 +168,7 @@
             <el-button v-if="!row.assignee_id" link size="small" type="success" @click="claim(row)">领用</el-button>
             <el-button v-else-if="row.assignee_id===me.id || isManager" link size="small" type="warning" @click="release(row)">释放</el-button>
             <el-button link size="small" @click="fetchFromRow(row)">取码</el-button>
-            <el-popconfirm title="确定删除？" @confirm="deleteAccount(row.id)">
-              <template #reference><el-button link size="small" type="danger">删除</el-button></template>
-            </el-popconfirm>
+            <el-button link size="small" type="danger" @click="deleteAccount(row.id)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -192,7 +190,7 @@
         <el-table-column label="操作" width="150" align="center">
           <template #default="{row}">
             <el-button link size="small" type="primary" @click="editTeam(row)">编辑</el-button>
-            <el-popconfirm title="确定删除？" @confirm="deleteTeam(row.id)"><template #reference><el-button link size="small" type="danger">删除</el-button></template></el-popconfirm>
+            <el-button link size="small" type="danger" @click="deleteTeam(row.id)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -223,7 +221,7 @@
           <template #default="{row}">
             <el-button link size="small" type="primary" @click="editUser(row)">编辑</el-button>
             <el-button link size="small" @click="resetUserPwd(row)">重置密码</el-button>
-            <el-popconfirm v-if="row.id!==me.id" title="确定删除？" @confirm="deleteUser(row.id)"><template #reference><el-button link size="small" type="danger">删除</el-button></template></el-popconfirm>
+            <el-button v-if="row.id!==me.id" link size="small" type="danger" @click="deleteUser(row.id)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -247,7 +245,7 @@
         <el-table-column label="操作" width="150" align="center">
           <template #default="{row}">
             <el-button link size="small" type="primary" @click="editServer(row)">编辑</el-button>
-            <el-popconfirm title="确定删除？" @confirm="deleteServer(row.id)"><template #reference><el-button link size="small" type="danger">删除</el-button></template></el-popconfirm>
+            <el-button link size="small" type="danger" @click="deleteServer(row.id)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -259,7 +257,7 @@
       <div class="toolbar">
         <el-input v-model="logSearch" placeholder="搜索邮箱/类型" style="width:220px" clearable @clear="loadLogs" @keyup.enter="loadLogs"></el-input>
         <el-button type="primary" @click="loadLogs">搜索</el-button>
-        <el-popconfirm v-if="isSuper" title="清空所有日志？" @confirm="clearLogs"><template #reference><el-button type="danger">清空日志</el-button></template></el-popconfirm>
+        <el-button v-if="isSuper" type="danger" @click="clearLogs">清空日志</el-button>
       </div>
       <el-table :data="logList" border stripe max-height="500">
         <el-table-column prop="id" label="ID" width="60"></el-table-column>
@@ -535,21 +533,26 @@ createApp({
         } else ElMessage.error(r.message);
       } finally { accSaving.value = false; }
     }
-    async function deleteAccount(id) { if (ok(await api('DELETE', '/api/admin/email/delete/' + id))) loadAccounts(); }
+    // 统一的危险操作二次确认（模态）。确认返回 true，取消返回 false。
+    async function confirmDanger(message, title = '确认操作', confirmText = '确定') {
+      try { await ElMessageBox.confirm(message, title, { type: 'warning', confirmButtonText: confirmText, cancelButtonText: '取消' }); return true; }
+      catch { return false; }
+    }
+    async function deleteAccount(id) {
+      if (!await confirmDanger('确定删除该账号？此操作不可恢复。', '删除账号', '删除')) return;
+      if (ok(await api('DELETE', '/api/admin/email/delete/' + id))) loadAccounts();
+    }
     async function deleteSelectedAccounts() {
       const n = selectedAccounts.value.length;
       if (!n) return;
-      try {
-        await ElMessageBox.confirm(`确定删除选中的 ${n} 个账号？此操作不可恢复。`, '批量删除',
-          { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' });
-      } catch { return; } // 用户取消
+      if (!await confirmDanger(`确定删除选中的 ${n} 个账号？此操作不可恢复。`, '批量删除', '删除')) return;
       if (ok(await api('POST', '/api/admin/email/delete-batch', { ids: selectedAccounts.value.map(a => a.id) }), '已删除')) {
         selectedAccounts.value = [];
         loadAccounts();
       }
     }
     async function rotateToken(row) {
-      await ElMessageBox.confirm('轮换后旧令牌立即失效，确定？', '提示', { type: 'warning' });
+      if (!await confirmDanger('轮换后旧令牌立即失效，确定？', '轮换令牌', '轮换')) return;
       const r = await api('POST', '/api/admin/email/rotate-token', { id: row.id });
       if (r.code === 200) { showSecret('新查询令牌', r.data.token); loadAccounts(); } else ElMessage.error(r.message);
     }
@@ -589,7 +592,10 @@ createApp({
       const r = await api(teamForm.id ? 'PUT' : 'POST', teamForm.id ? '/api/admin/team/update' : '/api/admin/team/create', teamForm);
       if (ok(r, '保存成功')) { teamDialog.value = false; loadTeams(); }
     }
-    async function deleteTeam(id) { if (ok(await api('DELETE', '/api/admin/team/delete/' + id))) loadTeams(); }
+    async function deleteTeam(id) {
+      if (!await confirmDanger('确定删除该团队？', '删除团队', '删除')) return;
+      if (ok(await api('DELETE', '/api/admin/team/delete/' + id))) loadTeams();
+    }
 
     // ── Users ──
     const userList = ref([]), userSearch = ref('');
@@ -607,7 +613,10 @@ createApp({
       const { value } = await ElMessageBox.prompt('输入新密码', '重置密码 - ' + row.username, { inputType: 'password' });
       if (ok(await api('POST', '/api/admin/user/reset-password', { id: row.id, newPassword: value }), '已重置')) {}
     }
-    async function deleteUser(id) { if (ok(await api('DELETE', '/api/admin/user/delete/' + id))) loadUsers(); }
+    async function deleteUser(id) {
+      if (!await confirmDanger('确定删除该用户？', '删除用户', '删除')) return;
+      if (ok(await api('DELETE', '/api/admin/user/delete/' + id))) loadUsers();
+    }
 
     // ── Profile ──
     const pwdForm = reactive({ oldPassword: '', newPassword: '' });
@@ -615,7 +624,7 @@ createApp({
       if (ok(await api('POST', '/api/admin/change-password', pwdForm), '密码已修改')) { pwdForm.oldPassword = ''; pwdForm.newPassword = ''; }
     }
     async function genApiKey() {
-      await ElMessageBox.confirm('生成/重置后旧 Key 立即失效，确定？', '提示', { type: 'warning' });
+      if (!await confirmDanger('生成/重置后旧 Key 立即失效，确定？', 'API Key', '继续')) return;
       const r = await api('POST', '/api/admin/api-key');
       if (r.code === 200) { showSecret('个人 API Key', r.data.apiKey); me.has_api_key = true; persistMe(); } else ElMessage.error(r.message);
     }
@@ -631,12 +640,18 @@ createApp({
       try { const r = await api(serverForm.id ? 'PUT' : 'POST', serverForm.id ? '/api/admin/mail-server/update' : '/api/admin/mail-server/create', serverForm); if (ok(r, '保存成功')) { serverDialog.value = false; loadServers(); } }
       finally { serverSaving.value = false; }
     }
-    async function deleteServer(id) { if (ok(await api('DELETE', '/api/admin/mail-server/delete/' + id))) loadServers(); }
+    async function deleteServer(id) {
+      if (!await confirmDanger('确定删除该服务配置？', '删除服务', '删除')) return;
+      if (ok(await api('DELETE', '/api/admin/mail-server/delete/' + id))) loadServers();
+    }
 
     // ── Logs ──
     const logList = ref([]), logTotal = ref(0), logPage = ref(1), logSearch = ref('');
     async function loadLogs() { const r = await api('GET', `/api/admin/logs/email?page=${logPage.value}&pageSize=30&keyword=${encodeURIComponent(logSearch.value)}`); if (r.code === 200) { logList.value = r.data.list; logTotal.value = r.data.total; } }
-    async function clearLogs() { if (ok(await api('POST', '/api/admin/logs/email/clear'), '已清空')) loadLogs(); }
+    async function clearLogs() {
+      if (!await confirmDanger('确定清空所有查询日志？此操作不可恢复。', '清空日志', '清空')) return;
+      if (ok(await api('POST', '/api/admin/logs/email/clear'), '已清空')) loadLogs();
+    }
 
     watch(page, (p) => {
       if (p === 'dashboard') loadStats();
