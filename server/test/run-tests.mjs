@@ -133,6 +133,15 @@ try {
   ok((await api('POST', '/api/admin/email/clear', {}, BOB)).code === 403, 'member 无法 clear(403)');
   ok((await api('POST', '/api/v1/claude/send', { email: 'x@y.com' })).code === 401, 'claude/send 未登录被拒(401)');
 
+  console.log('## 自助注册（@apexin.ai）');
+  ok((await api('POST', '/api/admin/register', { email: 'newbie@apexin.ai', password: 'secret1', confirmPassword: 'secret1' })).code === 200, '@apexin.ai 注册成功');
+  ok((await api('POST', '/api/admin/register', { email: 'newbie@apexin.ai', password: 'secret1', confirmPassword: 'secret1' })).code === 400, '重复邮箱被拒(400)');
+  ok((await api('POST', '/api/admin/register', { email: 'bad@gmail.com', password: 'secret1', confirmPassword: 'secret1' })).code === 400, '非 @apexin.ai 后缀被拒(400)');
+  ok((await api('POST', '/api/admin/register', { email: 'mism@apexin.ai', password: 'secret1', confirmPassword: 'secret2' })).code === 400, '两次密码不一致被拒(400)');
+  ok((await api('POST', '/api/admin/register', { email: 'short@apexin.ai', password: '123', confirmPassword: '123' })).code === 400, '密码过短被拒(400)');
+  const newLogin = await api('POST', '/api/admin/login', { username: 'NewBie@apexin.ai', password: 'secret1' });
+  ok(newLogin.code === 200 && newLogin.data.role === 'member' && newLogin.data.team_id === null, '注册用户可登录(大小写不敏感)、member、无团队');
+
   console.log('## stats 团队过滤');
   const aStats = await api('GET', '/api/admin/stats', null, ADMIN);
   const lStats = await api('GET', '/api/admin/stats', null, ALICE);

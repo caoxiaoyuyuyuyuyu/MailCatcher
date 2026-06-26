@@ -7,6 +7,7 @@
 
 - **统一接码** — 一个入口 `/api/v1/message`，按账号来源自动分发（本地 IMAP / mail.com / 171mail 转发）
 - **多租户与权限** — 团队 + 三级角色（super_admin / team_admin / member），账号与日志按团队隔离
+- **自助注册** — 用 `@apexin.ai` 邮箱注册（密码二次确认），注册后即可登录，管理员再分配团队/角色
 - **账号来源（source）** — `self`（自管邮箱，本地取码）/ `forward`（171mail 账号，API 转发取码）
 - **账号状态系统** — 健康状态（正常/异常/封禁/到期/停用）+ 领用占用 + 状态变更审计
 - **安全** — IMAP 密码与上游 token AES-256-GCM 加密存储；查询令牌存 hash、明文仅显示一次；日志脱敏
@@ -90,9 +91,10 @@ mailcatcher team list / user list / server list / log list / stats
 
 ## 使用流程
 
-1. **建团队、建用户**（super_admin）：团队管理 → 新建团队；用户管理 → 新建用户并分配角色/团队。
-2. **添加账号**：账号管理 → 添加账号，选来源 self/forward；创建后**一次性**显示查询令牌。
-3. **接码**：网页登录后「在线接码」按邮箱选账号取码；或脚本用令牌/API Key 取码。
+1. **注册账号**：首页「注册」→ 用 `@apexin.ai` 邮箱 + 密码二次确认完成注册，注册后即可登录（默认 `member`、无团队）。
+2. **分配团队/角色**（管理员）：用户管理里给注册用户分配团队与角色；团队管理可新建团队。
+3. **添加账号**：账号管理 → 添加账号，选来源 self/forward；创建后**一次性**显示查询令牌。
+4. **接码**：网页登录后「在线接码」按邮箱选账号取码；或脚本用令牌/API Key 取码。
 
 ## API 文档
 
@@ -107,7 +109,8 @@ mailcatcher team list / user list / server list / log list / stats
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/api/admin/login` | 登录 |
+| POST | `/api/admin/register` | 自助注册（公开，邮箱须 @apexin.ai + 密码二次确认） |
+| POST | `/api/admin/login` | 登录（邮箱/用户名，大小写不敏感） |
 | GET | `/api/admin/me` | 当前用户信息 |
 | POST | `/api/admin/change-password` | 改密 |
 | POST | `/api/admin/api-key` | 生成个人 API Key（仅显示一次） |

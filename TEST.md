@@ -22,6 +22,16 @@ ENCRYPTION_KEY=your-secret JWT_SECRET=your-jwt npm start   # http://localhost:30
 
 ## API 测试
 
+### 0. 自助注册（公开，邮箱须 @apexin.ai）
+
+```bash
+curl -X POST http://localhost:3000/api/admin/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"alice@apexin.ai","password":"secret1","confirmPassword":"secret1"}'
+# 成功 → { code:200 }；非 @apexin.ai / 两次密码不一致 / 重复邮箱 / 密码<6位 → { code:400 }
+# 注册即 member、无团队；注册后可用该邮箱登录（大小写不敏感）
+```
+
 ### 1. 登录（默认 super_admin）
 
 ```bash

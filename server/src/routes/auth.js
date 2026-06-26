@@ -19,11 +19,39 @@ function ensureDefaultAdmin() {
 }
 ensureDefaultAdmin();
 
+// 允许注册的邮箱后缀（可用环境变量覆盖，默认公司域名）
+const ALLOWED_EMAIL_SUFFIX = (process.env.REGISTER_EMAIL_SUFFIX || '@apexin.ai').toLowerCase();
+
+// 自助注册：邮箱(限定后缀) + 密码二次确认。注册即为 member，团队由管理员后续在用户管理中分配。
+router.post('/register', (req, res) => {
+  const email = (req.body.email || '').trim().toLowerCase();
+  const { password, confirmPassword } = req.body;
+  if (!email || !password) return res.json({ code: 400, message: '请输入邮箱和密码' });
+  if (!email.endsWith(ALLOWED_EMAIL_SUFFIX)) {
+    return res.json({ code: 400, message: `邮箱必须使用 ${ALLOWED_EMAIL_SUFFIX} 后缀` });
+  }
+  if (confirmPassword !== undefined && password !== confirmPassword) {
+    return res.json({ code: 400, message: '两次输入的密码不一致' });
+  }
+  if (String(password).length < 6) return res.json({ code: 400, message: '密码至少 6 位' });
+  try {
+    const hash = bcrypt.hashSync(password, 10);
+    db.prepare('INSERT INTO users (username, password_hash, role, team_id, status) VALUES (?, ?, ?, NULL, 1)')
+      .run(email, hash, 'member');
+    res.json({ code: 200, message: '注册成功，请登录' });
+  } catch (err) {
+    if (err.message.includes('UNIQUE')) return res.json({ code: 400, message: '该邮箱已注册' });
+    res.json({ code: 500, message: err.message });
+  }
+});
+
 router.post('/login', (req, res) => {
-  const { username, password } = req.body;
+  let { username, password } = req.body;
   if (!username || !password) {
     return res.json({ code: 400, message: '请输入用户名和密码' });
   }
+  username = username.trim();
+  if (username.includes('@')) username = username.toLowerCase(); // 邮箱登录大小写不敏感
   const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
   if (!user || !bcrypt.compareSync(password, user.password_hash)) {
     return res.json({ code: 401, message: '用户名或密码错误' });

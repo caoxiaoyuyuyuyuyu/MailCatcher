@@ -62,7 +62,10 @@
       </span>
       <el-button size="small" @click="logout">退出</el-button>
     </template>
-    <el-button v-else size="small" type="primary" @click="go('login')">管理登录</el-button>
+    <template v-else>
+      <el-button size="small" @click="go('register')">注册</el-button>
+      <el-button size="small" type="primary" @click="go('login')">登录</el-button>
+    </template>
   </div>
 
   <div class="app-content">
@@ -105,10 +108,25 @@
       <el-card class="login-card">
         <div class="login-title">登录</div>
         <el-form @submit.prevent="doLogin">
-          <el-form-item><el-input v-model="loginForm.username" placeholder="用户名" size="large"></el-input></el-form-item>
+          <el-form-item><el-input v-model="loginForm.username" placeholder="邮箱 / 用户名" size="large"></el-input></el-form-item>
           <el-form-item><el-input v-model="loginForm.password" type="password" placeholder="密码" size="large" show-password></el-input></el-form-item>
           <el-button type="primary" size="large" style="width:100%" :loading="loginLoading" native-type="submit">登 录</el-button>
         </el-form>
+        <div style="text-align:center;margin-top:14px;font-size:13px;color:#909399">还没有账号？<el-link type="primary" @click="go('register')">注册</el-link></div>
+      </el-card>
+    </div>
+
+    <!-- 注册 -->
+    <div v-if="page==='register'" class="login-wrapper">
+      <el-card class="login-card">
+        <div class="login-title">注册</div>
+        <el-form @submit.prevent="doRegister">
+          <el-form-item><el-input v-model="registerForm.email" placeholder="邮箱（须为 @apexin.ai）" size="large"></el-input></el-form-item>
+          <el-form-item><el-input v-model="registerForm.password" type="password" placeholder="设置密码（至少 6 位）" size="large" show-password></el-input></el-form-item>
+          <el-form-item><el-input v-model="registerForm.confirmPassword" type="password" placeholder="确认密码" size="large" show-password></el-input></el-form-item>
+          <el-button type="primary" size="large" style="width:100%" :loading="registerLoading" native-type="submit">注 册</el-button>
+        </el-form>
+        <div style="text-align:center;margin-top:14px;font-size:13px;color:#909399">已有账号？<el-link type="primary" @click="go('login')">去登录</el-link></div>
       </el-card>
     </div>
 
@@ -463,6 +481,27 @@ createApp({
       page.value = 'code';
     }
 
+    // ── Register ──
+    const REGISTER_SUFFIX = '@apexin.ai';
+    const registerForm = reactive({ email: '', password: '', confirmPassword: '' });
+    const registerLoading = ref(false);
+    async function doRegister() {
+      const email = registerForm.email.trim().toLowerCase();
+      if (!email.endsWith(REGISTER_SUFFIX)) { ElMessage.warning('邮箱必须使用 ' + REGISTER_SUFFIX + ' 后缀'); return; }
+      if (registerForm.password.length < 6) { ElMessage.warning('密码至少 6 位'); return; }
+      if (registerForm.password !== registerForm.confirmPassword) { ElMessage.warning('两次输入的密码不一致'); return; }
+      registerLoading.value = true;
+      try {
+        const r = await api('POST', '/api/admin/register', { email, password: registerForm.password, confirmPassword: registerForm.confirmPassword });
+        if (r.code === 200) {
+          ElMessage.success('注册成功，请登录');
+          loginForm.username = email;
+          registerForm.password = ''; registerForm.confirmPassword = '';
+          page.value = 'login';
+        } else ElMessage.error(r.message);
+      } finally { registerLoading.value = false; }
+    }
+
     // ── Code fetching ──
     const codeForm = reactive({ mode: token.value ? 'email' : 'token', token: '', email: '', type: 'gpt' });
     const codeTypes = [
@@ -667,6 +706,7 @@ createApp({
       page, go, token, me, isLoggedIn, isSuper, isManager, canManageUsers, roleTag,
       healthOptions, healthLabel, healthTag,
       loginForm, loginLoading, doLogin, logout,
+      registerForm, registerLoading, doRegister,
       codeForm, codeTypes, codeLoading, codeResult, codeResultType, fetchCode, fetchFromRow, copyText, ensureAccountsLoaded,
       stats,
       accountList, accTotal, accPage, accSearch, accSourceFilter, accHealthFilter, selectedAccounts, loadAccounts,
