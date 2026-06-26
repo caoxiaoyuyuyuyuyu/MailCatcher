@@ -536,7 +536,18 @@ createApp({
       } finally { accSaving.value = false; }
     }
     async function deleteAccount(id) { if (ok(await api('DELETE', '/api/admin/email/delete/' + id))) loadAccounts(); }
-    async function deleteSelectedAccounts() { if (ok(await api('POST', '/api/admin/email/delete-batch', { ids: selectedAccounts.value.map(a => a.id) }), '已删除')) loadAccounts(); }
+    async function deleteSelectedAccounts() {
+      const n = selectedAccounts.value.length;
+      if (!n) return;
+      try {
+        await ElMessageBox.confirm(`确定删除选中的 ${n} 个账号？此操作不可恢复。`, '批量删除',
+          { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' });
+      } catch { return; } // 用户取消
+      if (ok(await api('POST', '/api/admin/email/delete-batch', { ids: selectedAccounts.value.map(a => a.id) }), '已删除')) {
+        selectedAccounts.value = [];
+        loadAccounts();
+      }
+    }
     async function rotateToken(row) {
       await ElMessageBox.confirm('轮换后旧令牌立即失效，确定？', '提示', { type: 'warning' });
       const r = await api('POST', '/api/admin/email/rotate-token', { id: row.id });
