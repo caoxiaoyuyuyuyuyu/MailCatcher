@@ -135,4 +135,5 @@ mailcatcher log list / clear            # 日志管理
 - **方案乙**：所有账号对外都用我方签发的 token（库内存 hash，创建/轮换时明文仅显示一次）
 - **默认管理员**：admin / admin123，角色为 `super_admin`（跨团队）
 - **自助注册**：`POST /api/admin/register`（公开），邮箱须 `@apexin.ai` 后缀 + 密码二次确认（≥6 位）；注册即 `member`、无团队，登录后由管理员在用户管理分配团队/角色。邮箱登录大小写不敏感
+- **前端导航按角色显隐**：member 只见「在线接码 + 账号管理」（登录落地账号管理）；管理员(super_admin/team_admin)另见控制台/用户管理/服务配置/查询日志/个人；团队管理仅 super_admin
 - **可配置**：`MAILCATCHER_DATA_DIR`（DB 目录）、`FORWARD_171_BASE`（171mail 地址，测试用）、`REGISTER_EMAIL_SUFFIX`（注册邮箱后缀，默认 `@apexin.ai`）

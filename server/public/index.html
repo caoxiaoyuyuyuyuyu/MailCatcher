@@ -45,13 +45,13 @@
     <div class="nav">
       <div class="nav-item" :class="{active: page==='code'}" @click="go('code')">在线接码</div>
       <template v-if="isLoggedIn">
-        <div class="nav-item" :class="{active: page==='dashboard'}" @click="go('dashboard')">控制台</div>
+        <div v-if="isManager" class="nav-item" :class="{active: page==='dashboard'}" @click="go('dashboard')">控制台</div>
         <div class="nav-item" :class="{active: page==='accounts'}" @click="go('accounts')">账号管理</div>
         <div v-if="isSuper" class="nav-item" :class="{active: page==='teams'}" @click="go('teams')">团队管理</div>
         <div v-if="canManageUsers" class="nav-item" :class="{active: page==='users'}" @click="go('users')">用户管理</div>
-        <div class="nav-item" :class="{active: page==='servers'}" @click="go('servers')">服务配置</div>
-        <div class="nav-item" :class="{active: page==='logs'}" @click="go('logs')">查询日志</div>
-        <div class="nav-item" :class="{active: page==='profile'}" @click="go('profile')">个人</div>
+        <div v-if="isManager" class="nav-item" :class="{active: page==='servers'}" @click="go('servers')">服务配置</div>
+        <div v-if="isManager" class="nav-item" :class="{active: page==='logs'}" @click="go('logs')">查询日志</div>
+        <div v-if="isManager" class="nav-item" :class="{active: page==='profile'}" @click="go('profile')">个人</div>
       </template>
     </div>
     <div class="spacer"></div>
@@ -465,7 +465,7 @@ createApp({
           localStorage.setItem('mc_token', token.value);
           persistMe();
           await loadMe();
-          page.value = 'dashboard'; loadStats();
+          page.value = isManager.value ? 'dashboard' : 'accounts'; // 成员直接进账号管理
           ElMessage.success('登录成功');
         } else ElMessage.error(r.message);
       } finally { loginLoading.value = false; }
