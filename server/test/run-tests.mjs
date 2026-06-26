@@ -138,6 +138,15 @@ try {
   const lStats = await api('GET', '/api/admin/stats', null, ALICE);
   ok(aStats.data.emails >= 3 && lStats.data.emails === 2, `stats 隔离 super=${aStats.data.emails} alice=${lStats.data.emails}`);
 
+  console.log('## 删除带日志的账号（FK 回归）');
+  const accDel = await api('POST', '/api/admin/email/create', { address: 'todelete@priest.com', source: 'forward', forward_token: 'x' }, ALICE);
+  await api('GET', `/api/v1/message?token=${accDel.data.token}&type=claude`); // 产生一条日志
+  const logsBefore = (await api('GET', '/api/admin/logs/email', null, ALICE)).data.total;
+  const delResp = await api('POST', '/api/admin/email/delete-batch', { ids: [accDel.data.id] }, ALICE);
+  ok(delResp.code === 200 && delResp.data.deleted === 1, '删除有日志的账号成功(不再 500/FK)');
+  ok(!(await api('GET', '/api/admin/email/list', null, ALICE)).data.list.some(a => a.id === accDel.data.id), '账号已删除');
+  ok((await api('GET', '/api/admin/logs/email', null, ALICE)).data.total === logsBefore, '日志保留(审计未丢，仅解除关联)');
+
   console.log(`\n=== RESULT: ${pass} passed, ${fail} failed ===`);
   teardown(fail ? 1 : 0);
 } catch (err) {

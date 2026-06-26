@@ -178,10 +178,20 @@ router.post('/rotate-token', (req, res) => {
 });
 
 // ── 删除 ────────────────────────────────────────────────
+// 账号被 email_logs.email_id 外键引用，直接删会触发 FOREIGN KEY 约束失败。
+// 事务内：保留日志做审计但解除关联(email_id=NULL)，清理状态日志，再删账号。
+const deleteAccountsTxn = db.transaction((ids) => {
+  if (!ids.length) return 0;
+  const ph = ids.map(() => '?').join(',');
+  db.prepare(`UPDATE email_logs SET email_id = NULL WHERE email_id IN (${ph})`).run(...ids);
+  db.prepare(`DELETE FROM account_status_logs WHERE account_id IN (${ph})`).run(...ids);
+  return db.prepare(`DELETE FROM emails WHERE id IN (${ph})`).run(...ids).changes;
+});
+
 router.delete('/delete/:id', (req, res) => {
   const acc = getVisibleAccount(req, Number(req.params.id));
   if (!acc) return res.json({ code: 404, message: '账号不存在或无权操作' });
-  db.prepare('DELETE FROM emails WHERE id = ?').run(acc.id);
+  deleteAccountsTxn([acc.id]);
   res.json({ code: 200, message: 'success' });
 });
 
@@ -190,8 +200,8 @@ router.post('/delete-batch', (req, res) => {
   if (!ids?.length) return res.json({ code: 400, message: '请选择要删除的账号' });
   const visible = ids.map(id => getVisibleAccount(req, id)).filter(Boolean).map(a => a.id);
   if (!visible.length) return res.json({ code: 400, message: '无可删除的账号' });
-  db.prepare(`DELETE FROM emails WHERE id IN (${visible.map(() => '?').join(',')})`).run(...visible);
-  res.json({ code: 200, data: { deleted: visible.length }, message: 'success' });
+  const deleted = deleteAccountsTxn(visible);
+  res.json({ code: 200, data: { deleted }, message: 'success' });
 });
 
 // ── 批量导入（仅 self）：每行 address----password----appkey ──
@@ -241,7 +251,11 @@ router.post('/test-connection', async (req, res) => {
 
 // ── 清空（仅 super_admin）────────────────────────────────
 router.post('/clear', requireRole('super_admin'), (req, res) => {
-  db.prepare('DELETE FROM emails').run();
+  db.transaction(() => {
+    db.prepare('UPDATE email_logs SET email_id = NULL').run();
+    db.prepare('DELETE FROM account_status_logs').run();
+    db.prepare('DELETE FROM emails').run();
+  })();
   res.json({ code: 200, message: 'success' });
 });
 
