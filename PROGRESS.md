@@ -33,3 +33,15 @@
 - **问题**：新 schema 用 `token_hash`，但**生产旧表仍保留 `token TEXT UNIQUE NOT NULL`**（ALTER 只能增列，删不掉带约束的旧列）。新建账号不写 `token` → `NOT NULL constraint failed: emails.token`。`npm test` 用全新干净库（无此列）所以一直没暴露——又是「测试没覆盖旧库形态」。
 - **解决**：emails.js 启动时探测是否有遗留 `token` 列，有则在 create/import 给它写 `token_hash`（满足 NOT NULL+UNIQUE，非明文）。用**生产库副本**实测建账号通过。
 - **避免**：凡涉及"旧库升级路径"的改动，务必拿**生产库副本**跑一遍，别只信全新库测试。彻底根治需重建表删掉遗留明文列（带 FK + UNIQUE，需谨慎，留作后续）。
+
+## 账号归属与分配（task-account-ownership）
+
+### 7. 接手停滞任务：先验证基线再判断「做到哪」（commit fd3b150）
+- **问题**：上一个任务（CCM #766）做账号归属/分配功能，prompt 太长进程退出停滞，worktree 留下未提交改动。直接看 diff 行数会误判「已完成」——后端+测试确实全绿(40 passed)，但**前端只改了模板没补脚本**：`index.html` 表格调 `showAssign(row)`，但 `<script>` 里仍是旧的 `claim/release`，没有 `showAssign`/分配弹窗/`grant·revoke` 调用。
+- **解决**：先跑 `npm test`(基线全绿) + `grep` 模板引用的方法在脚本里是否定义，定位到「前端 rewrite 中途断」。补齐 `showAssign`+分配弹窗+`/user/options` 下拉+`doGrant/doRevoke`，删死掉的 `claim/release` 及其 return 导出，抽出内联 `<script>` 跑 `node --check` 验证语法，再起服务冒烟。
+- **避免**：接手别人的半成品，不要只数 diff 行数。① 先跑测试确认基线；② 模板里每个 `@click`/绑定都 `grep` 一遍脚本是否有对应实现（前端无编译，缺方法不报错只在运行时炸）；③ 抽内联脚本 `node --check` + 起服务冒烟兜底。
+
+### 8. worktree 的 node_modules 符号链接差点被提交（commit fd3b150）
+- **问题**：CCM 建 worktree 时把 `server/node_modules` 做成**符号链接**指向主仓库（共享依赖省空间）。`.gitignore` 写的是 `node_modules/`（带斜杠只匹配目录），**符号链接不匹配**，于是 `git add server/` 把这个 link 当普通文件提交了（mode 120000）。
+- **解决**：`git rm --cached server/node_modules` + 在 `.gitignore` 追加不带斜杠的 `server/node_modules`，`git commit --amend`。
+- **避免**：提交前看 `git status --short`，出现 `node_modules`/`.venv` 等依赖目录立刻警觉；`.gitignore` 对「可能是符号链接」的路径别只写带斜杠的目录形式。`git ls-files | grep node_modules` 可快速自查是否误track。
