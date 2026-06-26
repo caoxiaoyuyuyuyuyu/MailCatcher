@@ -91,7 +91,9 @@
         </el-form-item>
         <p class="hint" style="margin-bottom:16px">仅获取 10 分钟内收到的验证码，超出则无效</p>
         <el-button type="primary" size="large" style="width:100%" :loading="codeLoading" @click="fetchCode">获取验证码</el-button>
+        <!-- Codex 一键登录发码：暂不开放（后端 /api/v1/codex/send 仍在，恢复时取消注释即可）
         <el-button v-if="codeForm.mode==='email'" size="large" type="warning" plain style="width:100%;margin:8px 0 0 0" :loading="codexLoading" @click="codexLoginAndFetch">发送 Codex 登录码并自动取码</el-button>
+        -->
         <div v-if="codeResult" :class="['code-result', codeResultType]">
           <div v-if="codeResultType==='success'" style="display:flex;align-items:center;justify-content:center;gap:12px">
             <span>{{ codeResult }}</span>
