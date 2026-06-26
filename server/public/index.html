@@ -333,7 +333,11 @@
         <el-switch v-model="accForm.shared" :active-value="1" :inactive-value="0"></el-switch>
         <span class="hint" style="margin-left:8px">开=共享(如 Codex，可分配给多人)；关=独占(如 Claude，单人)</span>
       </el-form-item>
-      <el-form-item label="购买人"><el-input v-model="accForm.purchaser" placeholder="谁出钱买的号，可选"></el-input></el-form-item>
+      <el-form-item label="购买人">
+        <el-select v-model="accForm.purchaser" filterable clearable placeholder="选择购买人，可选" style="width:100%">
+          <el-option v-for="u in userOptions" :key="u.id" :label="u.username" :value="u.username"></el-option>
+        </el-select>
+      </el-form-item>
       <el-form-item label="购买状态">
         <el-switch v-model="accForm.invoiced" :active-value="1" :inactive-value="0" active-text="已开票" inactive-text="未开票"></el-switch>
       </el-form-item>
@@ -577,12 +581,17 @@ createApp({
       if (r.code === 200) { accountList.value = r.data.list; accTotal.value = r.data.total; accountsLoaded = true; }
     }
     function ensureAccountsLoaded() { if (!accountsLoaded && isLoggedIn.value) loadAccounts(); }
+    // 用户下拉(供「购买人」「分配」共用，来自 /api/admin/user/options)
+    const userOptions = ref([]);
+    async function loadUserOptions() { const r = await api('GET', '/api/admin/user/options'); if (r.code === 200) userOptions.value = r.data.list; }
     function showAddAccount() {
       Object.assign(accForm, { id: null, source: 'self', address: '', password: '', appkey: '', fetch_address: '', forward_provider: '171mail', forward_token: '', shared: 0, purchaser: '', invoiced: 0, status: 1 });
+      loadUserOptions();
       accDialog.value = true;
     }
     function editAccount(row) {
       Object.assign(accForm, { id: row.id, source: row.source, address: row.address, password: '', appkey: row.appkey, fetch_address: row.fetch_address || '', forward_provider: row.forward_provider || '171mail', forward_token: '', shared: row.shared ? 1 : 0, purchaser: row.purchaser || '', invoiced: row.invoiced ? 1 : 0, status: row.status });
+      loadUserOptions();
       accDialog.value = true;
     }
     async function saveAccount() {
@@ -622,14 +631,13 @@ createApp({
       if (r.code === 200) { showSecret('新查询令牌', r.data.token); loadAccounts(); } else ElMessage.error(r.message);
     }
     // ── 分配 / 收回（owner 或 admin）。独占=单人替换，共享=可多人 ──
-    const assignDialog = ref(false), userOptions = ref([]), assignUserId = ref(null);
+    const assignDialog = ref(false), assignUserId = ref(null);
     const assignAcc = reactive({ id: null, address: '', shared: 0, grantees: [] });
     async function showAssign(row) {
       Object.assign(assignAcc, { id: row.id, address: row.address, shared: row.shared, grantees: row.grantees || [] });
       assignUserId.value = null;
       assignDialog.value = true;
-      const r = await api('GET', '/api/admin/user/options');
-      if (r.code === 200) userOptions.value = r.data.list;
+      loadUserOptions();
     }
     async function refreshAssign() {
       const r = await api('GET', '/api/admin/email/list?keyword=' + encodeURIComponent(assignAcc.address));
