@@ -91,6 +91,7 @@
         </el-form-item>
         <p class="hint" style="margin-bottom:16px">仅获取 10 分钟内收到的验证码，超出则无效</p>
         <el-button type="primary" size="large" style="width:100%" :loading="codeLoading" @click="fetchCode">获取验证码</el-button>
+        <el-button v-if="codeForm.mode==='email'" size="large" type="warning" plain style="width:100%;margin:8px 0 0 0" :loading="codexLoading" @click="codexLoginAndFetch">发送 Codex 登录码并自动取码</el-button>
         <div v-if="codeResult" :class="['code-result', codeResultType]">
           <div v-if="codeResultType==='success'" style="display:flex;align-items:center;justify-content:center;gap:12px">
             <span>{{ codeResult }}</span>
@@ -497,6 +498,26 @@ createApp({
     function fetchFromRow(row) { codeForm.mode = 'email'; codeForm.email = row.address; page.value = 'code'; fetchCode(); }
     function copyText(t) { navigator.clipboard.writeText(t); ElMessage.success('已复制'); }
 
+    // Codex 一键：触发 OpenAI 发码 → 轮询取码
+    const codexLoading = ref(false);
+    async function codexLoginAndFetch() {
+      if (!codeForm.email) { ElMessage.warning('请选择/输入邮箱'); return; }
+      codexLoading.value = true; codeResult.value = ''; codeResultType.value = 'info';
+      try {
+        const send = await api('POST', '/api/v1/codex/send', { email: codeForm.email });
+        if (send.code !== 200) { codeResult.value = '发码失败: ' + send.message; codeResultType.value = 'error'; return; }
+        ElMessage.success('已触发发码，正在等待并取码…');
+        for (let i = 0; i < 8; i++) {
+          await new Promise(r => setTimeout(r, 8000));
+          const headers = token.value ? { Authorization: 'Bearer ' + token.value } : {};
+          const d = await (await fetch(`${API}/api/v1/message?email=${encodeURIComponent(codeForm.email)}&type=${codeForm.type}`, { headers })).json();
+          if (d.code === 200 && d.data?.code) { codeResult.value = d.data.code; codeResultType.value = 'success'; return; }
+        }
+        codeResult.value = '已发码但暂未取到（稍后可点"获取验证码"重试；或该邮箱未配置到收件箱的转发）'; codeResultType.value = 'info';
+      } catch (e) { codeResult.value = '请求失败: ' + e.message; codeResultType.value = 'error'; }
+      finally { codexLoading.value = false; }
+    }
+
     // ── Stats ──
     const stats = reactive({});
     async function loadStats() { const r = await api('GET', '/api/admin/stats'); if (r.code === 200) Object.assign(stats, r.data); }
@@ -653,6 +674,7 @@ createApp({
       loginForm, loginLoading, doLogin, logout,
       registerForm, registerLoading, doRegister,
       codeForm, codeTypes, codeLoading, codeResult, codeResultType, fetchCode, fetchFromRow, copyText, ensureAccountsLoaded,
+      codexLoading, codexLoginAndFetch,
       stats,
       accountList, accTotal, accPage, accSearch, accSourceFilter, accHealthFilter, selectedAccounts, loadAccounts,
       accDialog, accSaving, accForm, showAddAccount, editAccount, saveAccount, deleteAccount, deleteSelectedAccounts, rotateToken, claim, release,

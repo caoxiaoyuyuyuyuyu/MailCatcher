@@ -9,6 +9,7 @@ import mailServerRoutes from './routes/mailServers.js';
 import messageRoutes from './routes/message.js';
 import logRoutes from './routes/logs.js';
 import claudeRoutes from './routes/claude.js';
+import codexRoutes from './routes/codex.js';
 import userRoutes from './routes/users.js';
 import { authMiddleware } from './middleware/auth.js';
 import db from './db.js';
@@ -26,6 +27,7 @@ app.use('/api/admin/email', emailRoutes);
 app.use('/api/admin/mail-server', mailServerRoutes);
 app.use('/api/v1/message', messageRoutes);
 app.use('/api/v1/claude', claudeRoutes);
+app.use('/api/v1/codex', codexRoutes);
 app.use('/api/admin/logs', logRoutes);
 
 app.use(express.static(join(__dirname, '..', 'public')));

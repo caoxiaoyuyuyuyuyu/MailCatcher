@@ -105,6 +105,7 @@ MailCatcher 已从「纯接码工具」演进为「**多租户账号管理 + 统
 - `server/src/services/crypto.js` — AES-256-GCM 加解密 + token hash（方案乙）
 - `server/src/middleware/auth.js` — JWT + requireRole(admin/member) + resolvePrincipal
 - `server/src/routes/message.js` — 接码 API (`/api/v1/message`)，按 source 分发本地/转发
+- `server/src/services/codexLogin.js` + `routes/codex.js` — 触发 OpenAI/Codex 邮箱 OTP 登录发码（`POST /api/v1/codex/send`）
 - `server/src/routes/emails.js` — 账号 CRUD（source/状态机/领用/token 轮换；增删改仅 admin）
 - `server/src/routes/users.js` — 用户管理（admin 升降级/重置/删除；防自锁）
 - `server/src/routes/mailServers.js` — IMAP 服务器配置
@@ -136,4 +137,5 @@ mailcatcher log list / clear            # 日志管理
 - **默认管理员**：admin / admin123，角色 `admin`（旧库 super_admin/team_admin 启动时自动迁移为 admin）
 - **自助注册**：`POST /api/admin/register`（公开），邮箱须 `@apexin.ai` 后缀 + 密码二次确认（≥6 位）；注册即 `member`，登录后由管理员在用户管理升级为 admin。邮箱登录大小写不敏感
 - **前端导航按角色显隐**：member 只见「在线接码 + 账号管理」（登录落地账号管理，且账号页无增删改按钮）；admin 另见控制台/用户管理/服务配置/查询日志/个人
+- **Codex 登录触发**：`POST /api/v1/codex/send`（需登录）用无头浏览器在 chatgpt.com 提交邮箱 → OpenAI 给该邮箱发「临时登录代码」（纯邮箱 OTP、无需密码、实测未遇验证码拦截）；再配合 self+`fetch_address` 转发收件箱把码取回。前端「在线接码」邮箱模式有「发送 Codex 登录码并自动取码」一键按钮。⚠ 依赖 OpenAI 登录页结构，可能随其改版/加强风控而失效
 - **可配置**：`MAILCATCHER_DATA_DIR`（DB 目录）、`FORWARD_171_BASE`（171mail 地址，测试用）、`REGISTER_EMAIL_SUFFIX`（注册邮箱后缀，默认 `@apexin.ai`）

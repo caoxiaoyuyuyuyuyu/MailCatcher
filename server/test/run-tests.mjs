@@ -111,6 +111,7 @@ try {
   console.log('## API Key + stats');
   const key = (await api('POST', '/api/admin/api-key', {}, ADMIN)).data.apiKey;
   ok((await api('GET', '/api/v1/message?email=fwd@priest.com&type=claude', null, key)).data?.code?.includes('magic-link'), 'API Key 按邮箱取码');
+  ok((await api('POST', '/api/v1/codex/send', { email: 'x@y.com' })).code === 401, 'codex/send 未登录被拒(401)');
   const stats = await api('GET', '/api/admin/stats', null, ADMIN);
   ok(stats.data.emails >= 2 && stats.data.teams === undefined, 'stats 无 teams 字段');
 

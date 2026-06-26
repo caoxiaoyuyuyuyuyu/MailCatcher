@@ -105,6 +105,7 @@ mailcatcher user list / server list / log list / stats
 |------|------|------|
 | GET | `/api/v1/message?token=&type=` | 按令牌接码（免认证） |
 | GET | `/api/v1/message?email=&type=` | 按邮箱接码（需 Bearer：JWT 或 API Key） |
+| POST | `/api/v1/codex/send` | 触发 OpenAI/Codex 给邮箱发登录码（需登录），随后用上面接口取码 |
 
 ### 认证
 
