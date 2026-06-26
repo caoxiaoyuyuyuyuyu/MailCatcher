@@ -75,9 +75,13 @@ try {
   ok((await api('GET', `/api/v1/message?token=${QTOKEN}&type=claude`)).data?.code?.includes('magic-link'), 'token 转发取到 magic-link');
   ok((await api('GET', `/api/v1/message?token=${QTOKEN}&type=gpt`)).message === 'no new message', '空邮件归一');
   ok((await api('POST', '/api/admin/email/create', { address: 'self@x.com', source: 'self', password: 'p' }, ADMIN)).code === 200, 'admin 创建 self 账号');
+  // 展示邮箱(outlook) 与 实际收件邮箱(mail.com) 分离
+  await api('POST', '/api/admin/email/create', { address: 'codex@outlook.com', source: 'self', fetch_address: 'inbox@mail.com', password: 'p' }, ADMIN);
+  const fwAcc = (await api('GET', '/api/admin/email/list?keyword=codex@outlook.com', null, ADMIN)).data.list[0];
+  ok(fwAcc && fwAcc.address === 'codex@outlook.com' && fwAcc.fetch_address === 'inbox@mail.com', '账号支持「展示邮箱≠收件邮箱」(fetch_address 存取)');
 
   console.log('## 成员权限');
-  ok((await api('GET', '/api/admin/email/list', null, MEMBER)).data.total === 2, '成员可浏览账号池（共享，看到全部）');
+  ok((await api('GET', '/api/admin/email/list', null, MEMBER)).data.total === 3, '成员可浏览账号池（共享，看到全部）');
   ok((await api('GET', '/api/v1/message?email=fwd@priest.com&type=claude', null, MEMBER)).data?.code?.includes('magic-link'), '成员可按邮箱取码（单池）');
   ok((await api('POST', '/api/admin/email/create', { address: 'z@x.com', source: 'self' }, MEMBER)).code === 403, '成员不能创建账号(403)');
   ok((await api('POST', '/api/admin/email/delete-batch', { ids: [1] }, MEMBER)).code === 403, '成员不能删除账号(403)');

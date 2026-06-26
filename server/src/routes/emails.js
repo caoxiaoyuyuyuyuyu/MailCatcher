@@ -39,7 +39,7 @@ router.get('/list', (req, res) => {
   const total = db.prepare(`SELECT COUNT(*) c FROM emails e WHERE ${where}`).get(...params).c;
   const list = db.prepare(
     `SELECT e.id, e.address, e.source, e.appkey, e.token_prefix, e.health_status, e.status,
-            e.batch_no, e.assignee_id, e.fail_count, e.forward_provider, e.created_at, e.updated_at,
+            e.batch_no, e.assignee_id, e.fail_count, e.forward_provider, e.fetch_address, e.created_at, e.updated_at,
             (e.password_enc != '') AS has_password,
             (e.forward_token_enc != '') AS has_forward_token,
             u.username AS assignee_name
@@ -53,7 +53,7 @@ router.get('/list', (req, res) => {
 
 // ── 创建（管理员）────────────────────────────────────────
 router.post('/create', adminOnly, (req, res) => {
-  const { address, source = 'self', appkey, batch_no, password, forward_provider = '171mail', forward_token } = req.body;
+  const { address, source = 'self', appkey, batch_no, password, fetch_address, forward_provider = '171mail', forward_token } = req.body;
   if (!address) return res.json({ code: 400, message: '邮箱地址不能为空' });
   if (!['self', 'forward'].includes(source)) return res.json({ code: 400, message: '非法来源' });
   if (source === 'forward' && !forward_token) return res.json({ code: 400, message: 'forward 账号必须提供上游 token' });
@@ -62,12 +62,13 @@ router.post('/create', adminOnly, (req, res) => {
   try {
     const info = db.prepare(
       `INSERT INTO emails
-         (address, source, appkey, batch_no, password_enc, forward_provider, forward_token_enc,
+         (address, source, appkey, batch_no, password_enc, fetch_address, forward_provider, forward_token_enc,
           token_hash, token_prefix, health_status, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 1)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 1)`
     ).run(
       address, source, appkey || '', batch_no || '',
       source === 'self' ? encrypt(password || '') : '',
+      source === 'self' ? (fetch_address || '') : '',
       source === 'forward' ? forward_provider : '',
       source === 'forward' ? encrypt(forward_token) : '',
       token_hash, token_prefix
@@ -81,19 +82,20 @@ router.post('/create', adminOnly, (req, res) => {
 
 // ── 更新（管理员；不改 source/token，密码与上游 token 仅在传入时更新）──
 router.put('/update', adminOnly, (req, res) => {
-  const { id, address, appkey, batch_no, status, password, forward_token } = req.body;
+  const { id, address, appkey, batch_no, status, password, fetch_address, forward_token } = req.body;
   if (!id) return res.json({ code: 400, message: 'id 不能为空' });
   const acc = getAccount(id);
   if (!acc) return res.json({ code: 404, message: '账号不存在' });
 
   const newPasswordEnc = (acc.source === 'self' && password) ? encrypt(password) : acc.password_enc;
   const newForwardEnc = (acc.source === 'forward' && forward_token) ? encrypt(forward_token) : acc.forward_token_enc;
+  const newFetch = acc.source === 'self' ? (fetch_address ?? acc.fetch_address) : acc.fetch_address;
   db.prepare(
     `UPDATE emails SET address = ?, appkey = ?, batch_no = ?, status = ?,
-       password_enc = ?, forward_token_enc = ?, updated_at = datetime('now') WHERE id = ?`
+       password_enc = ?, fetch_address = ?, forward_token_enc = ?, updated_at = datetime('now') WHERE id = ?`
   ).run(
     address ?? acc.address, appkey ?? acc.appkey, batch_no ?? acc.batch_no,
-    status ?? acc.status, newPasswordEnc, newForwardEnc, id
+    status ?? acc.status, newPasswordEnc, newFetch, newForwardEnc, id
   );
   res.json({ code: 200, message: 'success' });
 });

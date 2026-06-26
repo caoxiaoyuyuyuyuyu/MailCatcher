@@ -44,6 +44,8 @@ ENCRYPTION_KEY=请设置随机密钥 JWT_SECRET=请设置随机密钥 npm start
 | `self` | 自管邮箱（密码加密存） | 系统自动签发 | 本地 IMAP / mail.com Web API |
 | `forward` | 171mail 账号（上游 token 加密存） | 系统自动签发 | 转发到 `b.171mail.com/api/v1/message` |
 
+> **展示邮箱 ≠ 收件邮箱**：`self` 账号可设「收件邮箱」`fetch_address`。用于 Codex 这类——用 Outlook 邮箱订阅（展示用 Outlook），验证码转发到公司 mail.com（实际从 mail.com 取码）。多个 Outlook 共用一个 mail.com 收件箱时，按转发邮件里保留的原始 `To:` 自动区分。「收件密码」填收件邮箱的密码。
+
 > 不论哪种来源，对外都用 **MailCatcher 自己签发的查询令牌**（库内存 hash）；171mail 的上游 token 仅作内部加密凭证。
 
 ## 接码（两种方式）

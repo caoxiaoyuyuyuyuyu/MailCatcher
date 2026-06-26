@@ -110,6 +110,7 @@ for (const [col, def] of [
   ['team_id', 'INTEGER'],
   ['assignee_id', 'INTEGER'],
   ['password_enc', "TEXT DEFAULT ''"],
+  ['fetch_address', "TEXT DEFAULT ''"],
   ['forward_provider', "TEXT DEFAULT ''"],
   ['forward_token_enc', "TEXT DEFAULT ''"],
   ['token_hash', 'TEXT'],

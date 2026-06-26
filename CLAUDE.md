@@ -86,7 +86,7 @@ MailCatcher 已从「纯接码工具」演进为「**多租户账号管理 + 统
 - **前端**: Vue 3 + Element Plus (CDN 模式，单 HTML 文件)
 - **单团队 + 两级角色**: 一个服务一个团队；users 仅 `admin` / `member`。账号池全局共享（无团队隔离），管理员管账号/用户，成员只浏览+取码+(独占)自助领用；管理员可升降级他人
 - **账号来源(source)**:
-  - `self` — 自管邮箱，本地 IMAP/mailcom 取码（密码 AES-GCM 加密存）
+  - `self` — 自管邮箱，本地 IMAP/mailcom 取码（密码 AES-GCM 加密存）；可设 `fetch_address`(实际收件邮箱)与展示 `address` 分离——如 Codex 用 Outlook 订阅(展示)、验证码转发到公司 mail.com(收件)，取码时按转发邮件正文里的 `To:<原 Outlook>` 过滤区分
   - `forward` — 171mail 账号，转发到 `b.171mail.com/api/v1/message`（上游 token 加密存）
 - **统一接码**: `GET /api/v1/message?token=&type=` 按 source 分发；对外只认我方签发 token(存 hash)
 - **状态系统**: 健康轴 `health_status`(active/error/banned/expired/disabled) + 占用轴 `assignee_id`，

@@ -50,7 +50,10 @@ async function runFetch(res, account, type, label, requestedBy) {
     } else {
       const password = decrypt(account.password_enc);
       if (!password) return res.json({ code: 400, message: '该邮箱未配置密码，无法查询' });
-      result = await fetchVerificationCode(account.address, password, type);
+      // fetch_address：实际收件邮箱（如转发收件箱），与展示邮箱 address 不同时，按原始收件人过滤
+      const mailbox = account.fetch_address || account.address;
+      const recipient = account.fetch_address ? account.address : null;
+      result = await fetchVerificationCode(mailbox, password, type, recipient);
     }
     if (account.fail_count) db.prepare('UPDATE emails SET fail_count = 0 WHERE id = ?').run(account.id);
     logQuery(account, label, type, result, true, null, requestedBy);

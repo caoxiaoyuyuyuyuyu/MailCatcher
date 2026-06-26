@@ -158,7 +158,12 @@
       </div>
       <el-table :data="accountList" border stripe @selection-change="v => selectedAccounts = v" max-height="560">
         <el-table-column v-if="isAdmin" type="selection" width="42"></el-table-column>
-        <el-table-column prop="address" label="邮箱地址" min-width="190" show-overflow-tooltip></el-table-column>
+        <el-table-column label="邮箱地址" min-width="200" show-overflow-tooltip>
+          <template #default="{row}">
+            <div>{{ row.address }}</div>
+            <div v-if="row.fetch_address" class="hint">收件: {{ row.fetch_address }}</div>
+          </template>
+        </el-table-column>
         <el-table-column label="来源" width="90" align="center">
           <template #default="{row}"><el-tag size="small" :type="row.source==='forward'?'warning':'primary'">{{ row.source==='forward'?'171mail':'自管' }}</el-tag></template>
         </el-table-column>
@@ -300,7 +305,11 @@
       </el-form-item>
       <el-form-item label="邮箱地址" required><el-input v-model="accForm.address" placeholder="user@example.com"></el-input></el-form-item>
       <template v-if="accForm.source==='self'">
-        <el-form-item label="邮箱密码"><el-input v-model="accForm.password" :placeholder="accForm.id?'留空则不修改':'IMAP/应用专用密码'" show-password></el-input></el-form-item>
+        <el-form-item label="收件邮箱">
+          <el-input v-model="accForm.fetch_address" placeholder="留空=同上；转发场景填实际收件箱，如 xx@mail.com"></el-input>
+          <div class="hint">展示用上面的「邮箱地址」；实际从「收件邮箱」取码（如 Codex 用 Outlook 订阅、邮件转发到公司 mail.com）。下面密码填「收件邮箱」的密码。</div>
+        </el-form-item>
+        <el-form-item label="收件密码"><el-input v-model="accForm.password" :placeholder="accForm.id?'留空则不修改':'收件邮箱的 IMAP/登录密码'" show-password></el-input></el-form-item>
         <el-form-item label="应用密钥"><el-input v-model="accForm.appkey" placeholder="可选"></el-input></el-form-item>
       </template>
       <template v-else>
@@ -497,7 +506,7 @@ createApp({
     const accSearch = ref(''), accSourceFilter = ref(''), accHealthFilter = ref('');
     const selectedAccounts = ref([]);
     const accDialog = ref(false), accSaving = ref(false);
-    const accForm = reactive({ id: null, source: 'self', address: '', password: '', appkey: '', forward_provider: '171mail', forward_token: '', status: 1 });
+    const accForm = reactive({ id: null, source: 'self', address: '', password: '', appkey: '', fetch_address: '', forward_provider: '171mail', forward_token: '', status: 1 });
     let accountsLoaded = false;
     async function loadAccounts() {
       const q = `page=${accPage.value}&pageSize=30&keyword=${encodeURIComponent(accSearch.value)}&source=${accSourceFilter.value}&health=${accHealthFilter.value}`;
@@ -506,11 +515,11 @@ createApp({
     }
     function ensureAccountsLoaded() { if (!accountsLoaded && isLoggedIn.value) loadAccounts(); }
     function showAddAccount() {
-      Object.assign(accForm, { id: null, source: 'self', address: '', password: '', appkey: '', forward_provider: '171mail', forward_token: '', status: 1 });
+      Object.assign(accForm, { id: null, source: 'self', address: '', password: '', appkey: '', fetch_address: '', forward_provider: '171mail', forward_token: '', status: 1 });
       accDialog.value = true;
     }
     function editAccount(row) {
-      Object.assign(accForm, { id: row.id, source: row.source, address: row.address, password: '', appkey: row.appkey, forward_provider: row.forward_provider || '171mail', forward_token: '', status: row.status });
+      Object.assign(accForm, { id: row.id, source: row.source, address: row.address, password: '', appkey: row.appkey, fetch_address: row.fetch_address || '', forward_provider: row.forward_provider || '171mail', forward_token: '', status: row.status });
       accDialog.value = true;
     }
     async function saveAccount() {

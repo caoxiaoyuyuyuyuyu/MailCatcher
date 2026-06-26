@@ -106,14 +106,22 @@ function isMailcomDomain(emailAddress) {
   return domain && (MAILCOM_DOMAINS.has(domain) || domain.endsWith('.mail.com'));
 }
 
-export async function fetchVerificationCode(emailAddress, password, type) {
+// recipient（可选）：转发收件箱场景下，按原始收件人（展示邮箱）过滤——
+// 转发邮件正文会保留 "To: <原邮箱>"，据此区分同一收件箱里不同账号的验证码。
+export async function fetchVerificationCode(emailAddress, password, type, recipient) {
   if (isMailcomDomain(emailAddress)) {
-    return fetchViaWebApi(emailAddress, password, type);
+    return fetchViaWebApi(emailAddress, password, type, recipient);
   }
-  return fetchViaImap(emailAddress, password, type);
+  return fetchViaImap(emailAddress, password, type, recipient);
 }
 
-async function fetchViaWebApi(emailAddress, password, type) {
+function matchesRecipient(recipient, ...texts) {
+  if (!recipient) return true;
+  const hay = texts.join(' ').toLowerCase();
+  return hay.includes(recipient.toLowerCase());
+}
+
+async function fetchViaWebApi(emailAddress, password, type, recipient) {
   const { fetchMailcomEmails } = await import('./mailcom.js');
   const emails = await fetchMailcomEmails(emailAddress, password);
 
@@ -127,6 +135,7 @@ async function fetchViaWebApi(emailAddress, password, type) {
     const subjectMatch = typeFilter.subject.test(email.subject || '');
 
     if (!fromMatch && !subjectMatch && type !== 'all') continue;
+    if (!matchesRecipient(recipient, email.body, email.subject, email.from)) continue;
 
     const code = extractCode(email.body) || extractCode(email.subject);
     const link = (email.links && email.links.length > 0)
@@ -147,7 +156,7 @@ async function fetchViaWebApi(emailAddress, password, type) {
   return null;
 }
 
-async function fetchViaImap(emailAddress, password, type) {
+async function fetchViaImap(emailAddress, password, type, recipient) {
   const serverConfig = getServerConfig(emailAddress);
   if (!serverConfig) {
     throw new Error(`无法确定 ${emailAddress} 的 IMAP 服务器`);
@@ -215,6 +224,8 @@ async function fetchViaImap(emailAddress, password, type) {
           const parsed = await simpleParser(msg.source);
           bodyText = parsed.text || parsed.html || '';
         }
+
+        if (!matchesRecipient(recipient, bodyText, subject, fromAddr)) continue;
 
         const code = extractCode(subject) || extractCode(bodyText);
         const link = extractLink(bodyText);
