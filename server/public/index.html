@@ -184,6 +184,7 @@
         <el-table-column label="添加人" width="120" show-overflow-tooltip>
           <template #default="{row}"><span v-if="row.created_by_name">{{ row.created_by_name }}</span><span v-else class="hint">—</span></template>
         </el-table-column>
+        <el-table-column prop="created_at" label="添加时间" width="160"></el-table-column>
         <el-table-column label="分配给" min-width="130" show-overflow-tooltip>
           <template #default="{row}"><span v-if="row.grantees && row.grantees.length">{{ row.grantees.map(g=>g.username).join('、') }}</span><span v-else class="hint">未分配</span></template>
         </el-table-column>
