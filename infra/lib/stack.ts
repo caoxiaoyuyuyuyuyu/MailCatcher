@@ -29,17 +29,13 @@ export class MailCatcherStack extends cdk.Stack {
     });
 
     // ── Secrets ──────────────────────────────────────────
-    const appSecret = new secretsmanager.Secret(this, 'AppSecret', {
-      secretName: 'mailcatcher/prod',
-      generateSecretString: {
-        secretStringTemplate: JSON.stringify({
-          JWT_SECRET: '',
-          ENCRYPTION_KEY: '',
-        }),
-        generateStringKey: 'JWT_SECRET',
-        excludePunctuation: true,
-        passwordLength: 32,
-      },
+    const jwtSecret = new secretsmanager.Secret(this, 'JwtSecret', {
+      secretName: 'mailcatcher/jwt-secret',
+      generateSecretString: { excludePunctuation: true, passwordLength: 48 },
+    });
+    const encryptionKey = new secretsmanager.Secret(this, 'EncryptionKey', {
+      secretName: 'mailcatcher/encryption-key',
+      generateSecretString: { excludePunctuation: true, passwordLength: 48 },
     });
 
     // ── RDS PostgreSQL ──────────────────────────────────
@@ -108,8 +104,8 @@ export class MailCatcherStack extends cdk.Stack {
         PG_HOST: ecs.Secret.fromSecretsManager(dbSecret, 'host'),
         PG_USER: ecs.Secret.fromSecretsManager(dbSecret, 'username'),
         PG_PASSWORD: ecs.Secret.fromSecretsManager(dbSecret, 'password'),
-        JWT_SECRET: ecs.Secret.fromSecretsManager(appSecret, 'JWT_SECRET'),
-        ENCRYPTION_KEY: ecs.Secret.fromSecretsManager(appSecret, 'ENCRYPTION_KEY'),
+        JWT_SECRET: ecs.Secret.fromSecretsManager(jwtSecret),
+        ENCRYPTION_KEY: ecs.Secret.fromSecretsManager(encryptionKey),
       },
       portMappings: [{ containerPort: 3000 }],
       healthCheck: {
