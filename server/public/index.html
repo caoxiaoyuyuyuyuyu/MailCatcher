@@ -48,6 +48,7 @@
         <div v-if="isAdmin" class="nav-item" :class="{active: page==='dashboard'}" @click="go('dashboard')">控制台</div>
         <div class="nav-item" :class="{active: page==='accounts'}" @click="go('accounts')">账号管理</div>
         <div v-if="isAdmin" class="nav-item" :class="{active: page==='users'}" @click="go('users')">用户管理</div>
+        <div v-if="isAdmin" class="nav-item" :class="{active: page==='appkeys'}" @click="go('appkeys')">App Key</div>
         <div v-if="isAdmin" class="nav-item" :class="{active: page==='servers'}" @click="go('servers')">服务配置</div>
         <div v-if="isAdmin" class="nav-item" :class="{active: page==='logs'}" @click="go('logs')">查询日志</div>
         <div v-if="isAdmin" class="nav-item" :class="{active: page==='profile'}" @click="go('profile')">个人</div>
@@ -241,6 +242,54 @@
         </el-table-column>
       </el-table>
     </div>
+
+    <!-- App Key 管理 -->
+    <div v-if="page==='appkeys' && isAdmin" class="page-card">
+      <div class="page-title">App Key 管理</div>
+      <p class="hint" style="margin:-10px 0 16px">为外部系统创建 App Key，通过 <code>Authorization: Bearer ak_xxx:sk_xxx</code> 调用 API。</p>
+      <div class="toolbar">
+        <el-button type="success" @click="showAddAppKey">创建 App Key</el-button>
+      </div>
+      <el-table :data="appKeyList" border stripe>
+        <el-table-column prop="id" label="ID" width="60"></el-table-column>
+        <el-table-column prop="name" label="名称" min-width="150"></el-table-column>
+        <el-table-column prop="key_prefix" label="Key 前缀" width="160">
+          <template #default="{row}"><code>{{ row.key_prefix || '—' }}</code></template>
+        </el-table-column>
+        <el-table-column label="账号范围" width="120" align="center">
+          <template #default="{row}"><el-tag size="small" :type="(!row.allowed_accounts?.scope || row.allowed_accounts.scope==='all')?'success':'warning'">{{ (!row.allowed_accounts?.scope || row.allowed_accounts.scope==='all')?'全部':'指定' }}</el-tag></template>
+        </el-table-column>
+        <el-table-column label="状态" width="80" align="center">
+          <template #default="{row}"><el-tag size="small" :type="row.status==='active'?'success':'danger'">{{ row.status==='active'?'启用':'禁用' }}</el-tag></template>
+        </el-table-column>
+        <el-table-column prop="created_at" label="创建时间" width="160"></el-table-column>
+        <el-table-column label="操作" width="240" align="center">
+          <template #default="{row}">
+            <el-button link size="small" type="primary" @click="editAppKey(row)">编辑</el-button>
+            <el-button link size="small" type="warning" @click="rotateAppKey(row)">轮换</el-button>
+            <el-button link size="small" :type="row.status==='active'?'info':'success'" @click="toggleAppKey(row)">{{ row.status==='active'?'禁用':'启用' }}</el-button>
+            <el-button link size="small" type="danger" @click="deleteAppKey(row.id)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
+
+    <!-- App Key 创建/编辑 -->
+    <el-dialog v-model="appKeyDialog" :title="appKeyForm.id ? '编辑 App Key' : '创建 App Key'" width="480px">
+      <el-form label-width="90px">
+        <el-form-item label="名称" required><el-input v-model="appKeyForm.name" placeholder="外部系统名称，如「CRM 系统」"></el-input></el-form-item>
+        <el-form-item label="账号范围">
+          <el-radio-group v-model="appKeyForm.scopeType">
+            <el-radio value="all">全部账号</el-radio>
+            <el-radio value="ids">指定账号</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="appKeyForm.scopeType==='ids'" label="指定 ID">
+          <el-input v-model="appKeyForm.accountIds" placeholder="账号 ID，逗号分隔，如 1,2,5"></el-input>
+        </el-form-item>
+      </el-form>
+      <template #footer><el-button @click="appKeyDialog=false">取消</el-button><el-button type="primary" :loading="appKeySaving" @click="saveAppKey">保存</el-button></template>
+    </el-dialog>
 
     <!-- 服务配置 -->
     <div v-if="page==='servers' && isAdmin" class="page-card">
@@ -723,6 +772,61 @@ createApp({
       if (ok(await api('DELETE', '/api/admin/mail-server/delete/' + id))) loadServers();
     }
 
+    // ── App Keys ──
+    const appKeyList = ref([]);
+    const appKeyDialog = ref(false), appKeySaving = ref(false);
+    const appKeyForm = reactive({ id: null, name: '', scopeType: 'all', accountIds: '' });
+    async function loadAppKeys() {
+      const r = await api('GET', '/api/admin/app-keys/list');
+      if (r.code === 200) appKeyList.value = r.data.list;
+    }
+    function showAddAppKey() {
+      Object.assign(appKeyForm, { id: null, name: '', scopeType: 'all', accountIds: '' });
+      appKeyDialog.value = true;
+    }
+    function editAppKey(row) {
+      const scope = row.allowed_accounts || {};
+      Object.assign(appKeyForm, {
+        id: row.id, name: row.name,
+        scopeType: scope.scope === 'all' || !scope.scope ? 'all' : 'ids',
+        accountIds: (scope.account_ids || []).join(','),
+      });
+      appKeyDialog.value = true;
+    }
+    async function saveAppKey() {
+      if (!appKeyForm.name) { ElMessage.warning('请输入名称'); return; }
+      appKeySaving.value = true;
+      try {
+        const allowed_accounts = appKeyForm.scopeType === 'all'
+          ? { scope: 'all' }
+          : { scope: 'ids', account_ids: appKeyForm.accountIds.split(',').map(Number).filter(Boolean) };
+        if (appKeyForm.id) {
+          const r = await api('PUT', '/api/admin/app-keys/update', { id: appKeyForm.id, name: appKeyForm.name, allowed_accounts });
+          if (ok(r, '已更新')) { appKeyDialog.value = false; loadAppKeys(); }
+        } else {
+          const r = await api('POST', '/api/admin/app-keys/create', { name: appKeyForm.name, allowed_accounts });
+          if (r.code === 200) {
+            appKeyDialog.value = false; loadAppKeys();
+            showSecret('App Key 已创建', `App Key: ${r.data.appKey}\nApp Secret: ${r.data.appSecret}`);
+          } else ElMessage.error(r.message);
+        }
+      } finally { appKeySaving.value = false; }
+    }
+    async function rotateAppKey(row) {
+      if (!await confirmDanger('轮换后旧凭证立即失效，确定？', '轮换 App Key', '轮换')) return;
+      const r = await api('POST', '/api/admin/app-keys/rotate', { id: row.id });
+      if (r.code === 200) { showSecret('App Key 已轮换', `App Key: ${r.data.appKey}\nApp Secret: ${r.data.appSecret}`); loadAppKeys(); }
+      else ElMessage.error(r.message);
+    }
+    async function toggleAppKey(row) {
+      const next = row.status === 'active' ? 'disabled' : 'active';
+      if (ok(await api('PUT', '/api/admin/app-keys/update', { id: row.id, status: next }), next === 'active' ? '已启用' : '已禁用')) loadAppKeys();
+    }
+    async function deleteAppKey(id) {
+      if (!await confirmDanger('确定删除该 App Key？', '删除', '删除')) return;
+      if (ok(await api('DELETE', '/api/admin/app-keys/delete/' + id))) loadAppKeys();
+    }
+
     // ── Logs ──
     const logList = ref([]), logTotal = ref(0), logPage = ref(1), logSearch = ref('');
     async function loadLogs() { const r = await api('GET', `/api/admin/logs/email?page=${logPage.value}&pageSize=30&keyword=${encodeURIComponent(logSearch.value)}`); if (r.code === 200) { logList.value = r.data.list; logTotal.value = r.data.total; } }
@@ -735,6 +839,7 @@ createApp({
       if (p === 'dashboard') loadStats();
       if (p === 'accounts') loadAccounts();
       if (p === 'users') loadUsers();
+      if (p === 'appkeys') loadAppKeys();
       if (p === 'servers') loadServers();
       if (p === 'logs') loadLogs();
     });
@@ -756,6 +861,7 @@ createApp({
       secretDialog,
       userList, userSearch, loadUsers, userDialog, userForm, editUser, saveUser, resetUserPwd, deleteUser,
       pwdForm, changePwd, genApiKey,
+      appKeyList, appKeyDialog, appKeySaving, appKeyForm, loadAppKeys, showAddAppKey, editAppKey, saveAppKey, rotateAppKey, toggleAppKey, deleteAppKey,
       serverList, serverSearch, serverDialog, serverSaving, serverForm, loadServers, showAddServer, editServer, saveServer, deleteServer,
       logList, logTotal, logPage, logSearch, loadLogs, clearLogs,
     };

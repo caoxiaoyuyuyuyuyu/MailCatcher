@@ -28,7 +28,6 @@ export function authMiddleware(req, res, next) {
   }
 }
 
-// 角色门禁。单团队模型只有两种角色：admin / member
 export function requireRole(...roles) {
   return (req, res, next) => {
     if (!req.user || !roles.includes(req.user.role)) {
@@ -40,17 +39,51 @@ export function requireRole(...roles) {
 
 export const isAdmin = (req) => req.user?.role === 'admin';
 
-// 解析调用者身份：Bearer 既可是登录 JWT，也可是用户 API Key（按邮箱接码用）。
-export function resolvePrincipal(req) {
+export async function resolvePrincipal(req) {
   const h = req.headers.authorization;
   if (!h || !h.startsWith('Bearer ')) return null;
   const cred = h.slice(7);
   try {
     return jwt.verify(cred, JWT_SECRET);
   } catch {}
-  const u = db.prepare(
-    'SELECT id, username, role, status FROM users WHERE api_key_hash IS NOT NULL AND api_key_hash = ?'
-  ).get(hashToken(cred));
+  const u = await db('users')
+    .whereNotNull('api_key_hash')
+    .where('api_key_hash', hashToken(cred))
+    .first();
   if (u && u.status !== 0) return u;
+  return null;
+}
+
+export async function resolveAppKey(req) {
+  const h = req.headers.authorization;
+  if (!h || !h.startsWith('Bearer ')) return null;
+  const cred = h.slice(7);
+  if (!cred.includes(':')) return null;
+  const [keyPart, secretPart] = cred.split(':', 2);
+  if (!keyPart || !secretPart) return null;
+  const ak = await db('app_keys').where('key_hash', hashToken(keyPart)).first();
+  if (!ak || ak.status !== 'active') return null;
+  if (ak.secret_hash !== hashToken(secretPart)) return null;
+  return ak;
+}
+
+export async function resolveIdentity(req) {
+  const h = req.headers.authorization;
+  if (!h || !h.startsWith('Bearer ')) return null;
+  const cred = h.slice(7);
+  if (cred.includes(':')) {
+    const ak = await resolveAppKey(req);
+    if (ak) { req.appKey = ak; return ak; }
+  }
+  try {
+    const user = jwt.verify(cred, JWT_SECRET);
+    req.user = user;
+    return user;
+  } catch {}
+  const u = await db('users')
+    .whereNotNull('api_key_hash')
+    .where('api_key_hash', hashToken(cred))
+    .first();
+  if (u && u.status !== 0) { req.user = u; return u; }
   return null;
 }

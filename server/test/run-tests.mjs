@@ -139,6 +139,34 @@ try {
   const stats = await api('GET', '/api/admin/stats', null, ADMIN);
   ok(stats.data.emails >= 2 && stats.data.teams === undefined, 'stats 无 teams 字段');
 
+  console.log('## App Key 系统');
+  const ak = await api('POST', '/api/admin/app-keys/create', { name: '测试系统' }, ADMIN);
+  ok(ak.code === 200 && ak.data.appKey?.startsWith('ak_') && ak.data.appSecret?.startsWith('sk_'), 'App Key 创建成功(ak_+sk_)');
+  const akList = await api('GET', '/api/admin/app-keys/list', null, ADMIN);
+  ok(akList.data.list.length === 1 && akList.data.list[0].name === '测试系统', 'App Key 列表返回 1 条');
+  // App Key 取码：Bearer ak:sk
+  const akCred = `${ak.data.appKey}:${ak.data.appSecret}`;
+  const akMsg = await api('GET', '/api/v1/message?email=fwd@priest.com&type=claude', null, akCred);
+  ok(akMsg.data?.code?.includes('magic-link'), 'App Key 按邮箱取码成功');
+  // 错误的 secret 被拒
+  ok((await api('GET', '/api/v1/message?email=fwd@priest.com&type=claude', null, `${ak.data.appKey}:wrong`)).code === 401, '错误 secret 被拒(401)');
+  // member 不能管理 App Key
+  ok((await api('GET', '/api/admin/app-keys/list', null, MEMBER)).code === 403, 'member 不能管理 App Key(403)');
+  // 轮换 App Key
+  const akId = akList.data.list[0].id;
+  const rot2 = await api('POST', '/api/admin/app-keys/rotate', { id: akId }, ADMIN);
+  ok(rot2.code === 200 && rot2.data.appKey !== ak.data.appKey, 'App Key 轮换成功');
+  // 旧凭证失效
+  ok((await api('GET', '/api/v1/message?email=fwd@priest.com&type=claude', null, akCred)).code === 401, '轮换后旧 App Key 失效');
+  // 新凭证可用
+  const newCred = `${rot2.data.appKey}:${rot2.data.appSecret}`;
+  ok((await api('GET', '/api/v1/message?email=fwd@priest.com&type=claude', null, newCred)).data?.code?.includes('magic-link'), '轮换后新 App Key 可用');
+  // 禁用 App Key
+  await api('PUT', '/api/admin/app-keys/update', { id: akId, status: 'disabled' }, ADMIN);
+  ok((await api('GET', '/api/v1/message?email=fwd@priest.com&type=claude', null, newCred)).code === 401, '禁用后 App Key 被拒');
+  // 删除 App Key
+  ok((await api('DELETE', `/api/admin/app-keys/delete/${akId}`, null, ADMIN)).code === 200, 'App Key 删除成功');
+
   console.log(`\n=== RESULT: ${pass} passed, ${fail} failed ===`);
   teardown(fail ? 1 : 0);
 } catch (err) {

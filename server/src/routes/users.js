@@ -6,49 +6,43 @@ import { authMiddleware, requireRole } from '../middleware/auth.js';
 const router = Router();
 router.use(authMiddleware);
 
-// 用户选项（仅 id+用户名）：供"分配账号"下拉用，任何登录用户可读（owner 也能分配自己的账号）
-router.get('/options', (req, res) => {
-  const list = db.prepare('SELECT id, username FROM users WHERE status = 1 ORDER BY username').all();
+router.get('/options', async (req, res) => {
+  const list = await db('users').select('id', 'username').where('status', 1).orderBy('username');
   res.json({ code: 200, data: { list }, message: 'success' });
 });
 
-router.use(requireRole('admin')); // 以下：仅管理员可管理用户
+router.use(requireRole('admin'));
 
 const ROLES = ['admin', 'member'];
 
-router.get('/list', (req, res) => {
+router.get('/list', async (req, res) => {
   const { keyword = '' } = req.query;
-  let where = '1=1';
-  const params = [];
-  if (keyword) { where += ' AND username LIKE ?'; params.push(`%${keyword}%`); }
-  const list = db.prepare(
-    `SELECT id, username, role, status, created_at, (api_key_hash IS NOT NULL) AS has_api_key
-     FROM users WHERE ${where} ORDER BY id`
-  ).all(...params);
+  let query = db('users').select('id', 'username', 'role', 'status', 'created_at', db.raw('(api_key_hash IS NOT NULL) AS has_api_key'));
+  if (keyword) query = query.where('username', 'like', `%${keyword}%`);
+  const list = await query.orderBy('id');
+  for (const r of list) r.has_api_key = !!r.has_api_key;
   res.json({ code: 200, data: { list, total: list.length } });
 });
 
-// 保留创建端点（前端入口已移除，主要供脚本/测试用）
-router.post('/create', (req, res) => {
+router.post('/create', async (req, res) => {
   const { username, password, role = 'member' } = req.body;
   if (!username || !password) return res.json({ code: 400, message: '用户名和密码不能为空' });
   if (!ROLES.includes(role)) return res.json({ code: 400, message: '非法角色' });
   try {
     const hash = bcrypt.hashSync(password, 10);
-    const info = db.prepare('INSERT INTO users (username, password_hash, role, status) VALUES (?, ?, ?, 1)')
-      .run(username, hash, role);
-    res.json({ code: 200, data: { id: info.lastInsertRowid }, message: 'success' });
+    const [inserted] = await db('users').insert({ username, password_hash: hash, role, status: 1 }).returning('id');
+    const id = typeof inserted === 'object' ? inserted.id : inserted;
+    res.json({ code: 200, data: { id }, message: 'success' });
   } catch (err) {
-    if (err.message.includes('UNIQUE')) return res.json({ code: 400, message: '用户名已存在' });
+    if (err.message.includes('UNIQUE') || err.code === '23505') return res.json({ code: 400, message: '用户名已存在' });
     res.json({ code: 500, message: err.message });
   }
 });
 
-// 管理员可设置他人角色(admin/member)与启用状态；不可改自己（防自锁）
-router.put('/update', (req, res) => {
+router.put('/update', async (req, res) => {
   const { id, role, status } = req.body;
   if (!id) return res.json({ code: 400, message: 'id 不能为空' });
-  const target = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+  const target = await db('users').where('id', id).first();
   if (!target) return res.json({ code: 404, message: '用户不存在' });
   if (id === req.user.id) return res.json({ code: 400, message: '不能修改自己的角色或状态' });
 
@@ -58,23 +52,23 @@ router.put('/update', (req, res) => {
     nextRole = role;
   }
   if (status !== undefined) nextStatus = status ? 1 : 0;
-  db.prepare('UPDATE users SET role = ?, status = ? WHERE id = ?').run(nextRole, nextStatus, id);
+  await db('users').where('id', id).update({ role: nextRole, status: nextStatus });
   res.json({ code: 200, message: 'success' });
 });
 
-router.post('/reset-password', (req, res) => {
+router.post('/reset-password', async (req, res) => {
   const { id, newPassword } = req.body;
   if (!id || !newPassword) return res.json({ code: 400, message: 'id 和新密码不能为空' });
-  if (!db.prepare('SELECT id FROM users WHERE id = ?').get(id)) return res.json({ code: 404, message: '用户不存在' });
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(newPassword, 10), id);
+  if (!await db('users').where('id', id).first()) return res.json({ code: 404, message: '用户不存在' });
+  await db('users').where('id', id).update({ password_hash: bcrypt.hashSync(newPassword, 10) });
   res.json({ code: 200, message: 'success' });
 });
 
-router.delete('/delete/:id', (req, res) => {
+router.delete('/delete/:id', async (req, res) => {
   const id = Number(req.params.id);
   if (id === req.user.id) return res.json({ code: 400, message: '不能删除自己' });
-  if (!db.prepare('SELECT id FROM users WHERE id = ?').get(id)) return res.json({ code: 404, message: '用户不存在' });
-  db.prepare('DELETE FROM users WHERE id = ?').run(id);
+  if (!await db('users').where('id', id).first()) return res.json({ code: 404, message: '用户不存在' });
+  await db('users').where('id', id).del();
   res.json({ code: 200, message: 'success' });
 });
 

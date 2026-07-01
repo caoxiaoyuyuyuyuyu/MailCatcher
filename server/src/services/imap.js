@@ -17,11 +17,11 @@ async function isMxMailcom(domain) {
   }
 }
 
-function getServerConfig(emailAddress) {
+async function getServerConfig(emailAddress) {
   const domain = emailAddress.split('@')[1]?.toLowerCase();
   if (!domain) return null;
 
-  const server = db.prepare('SELECT * FROM mail_servers WHERE domain = ? AND status = 1').get(domain);
+  const server = await db('mail_servers').where({ domain, status: 1 }).first();
   if (server) {
     return { host: server.host, port: server.port, secure: !!server.use_ssl };
   }
@@ -173,7 +173,7 @@ async function fetchViaWebApi(emailAddress, password, type, recipient) {
 }
 
 async function fetchViaImap(emailAddress, password, type, recipient) {
-  const serverConfig = getServerConfig(emailAddress);
+  const serverConfig = await getServerConfig(emailAddress);
   if (!serverConfig) {
     throw new Error(`无法确定 ${emailAddress} 的 IMAP 服务器`);
   }
@@ -267,7 +267,7 @@ async function fetchViaImap(emailAddress, password, type, recipient) {
 }
 
 export async function testImapConnection(emailAddress, password) {
-  const serverConfig = getServerConfig(emailAddress);
+  const serverConfig = await getServerConfig(emailAddress);
   if (!serverConfig) {
     throw new Error(`无法确定 ${emailAddress} 的 IMAP 服务器`);
   }

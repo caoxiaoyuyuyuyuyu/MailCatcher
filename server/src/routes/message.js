@@ -3,38 +3,40 @@ import db from '../db.js';
 import { fetchVerificationCode } from '../services/imap.js';
 import { fetchVia171 } from '../services/forward171.js';
 import { decrypt, hashToken, maskToken } from '../services/crypto.js';
-import { resolvePrincipal } from '../middleware/auth.js';
+import { resolveIdentity } from '../middleware/auth.js';
 
 const router = Router();
 
-const FAIL_THRESHOLD = 3; // 连续失败达到此值自动标记 error
+const FAIL_THRESHOLD = 3;
 const BLOCKED_HEALTH = new Set(['banned', 'expired', 'disabled']);
 
-function logQuery(account, label, type, result, success, errorMsg, requestedBy) {
-  db.prepare(
-    `INSERT INTO email_logs
-       (email_id, email_address, requested_by, query_type, query_token, subject, code, raw_body, success, error_msg)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    account.id, account.address, requestedBy || null, type,
-    label,                                        // 仅存掩码/标识，不留明文令牌
-    result?.subject || '',
-    result?.code ? maskToken(result.code) : '',   // 验证码脱敏
-    '',                                           // 不落库原文邮件正文
-    success ? 1 : 0,
-    errorMsg || null
-  );
+async function logQuery(account, label, type, result, success, errorMsg, requestedBy) {
+  await db('email_logs').insert({
+    email_id: account.id,
+    email_address: account.address,
+    requested_by: requestedBy || null,
+    query_type: type,
+    query_token: label,
+    subject: result?.subject || '',
+    code: result?.code ? maskToken(result.code) : '',
+    raw_body: '',
+    success: success ? 1 : 0,
+    error_msg: errorMsg || null,
+  });
 }
 
-function markError(account, reason) {
+async function markError(account, reason) {
   const next = (account.fail_count || 0) + 1;
-  db.prepare('UPDATE emails SET fail_count = ? WHERE id = ?').run(next, account.id);
+  await db('emails').where('id', account.id).update({ fail_count: next });
   if (next >= FAIL_THRESHOLD && account.health_status === 'active') {
-    db.prepare("UPDATE emails SET health_status = 'error', updated_at = datetime('now') WHERE id = ?").run(account.id);
-    db.prepare(
-      `INSERT INTO account_status_logs (account_id, from_status, to_status, changed_by, reason)
-       VALUES (?, 'active', 'error', NULL, ?)`
-    ).run(account.id, `连续 ${next} 次取码失败自动标记: ${reason}`.slice(0, 200));
+    await db('emails').where('id', account.id).update({ health_status: 'error', updated_at: db.fn.now() });
+    await db('account_status_logs').insert({
+      account_id: account.id,
+      from_status: 'active',
+      to_status: 'error',
+      changed_by: null,
+      reason: `连续 ${next} 次取码失败自动标记: ${reason}`.slice(0, 200),
+    });
   }
 }
 
@@ -50,13 +52,12 @@ async function runFetch(res, account, type, label, requestedBy) {
     } else {
       const password = decrypt(account.password_enc);
       if (!password) return res.json({ code: 400, message: '该邮箱未配置密码，无法查询' });
-      // fetch_address：实际收件邮箱（如转发收件箱），与展示邮箱 address 不同时，按原始收件人过滤
       const mailbox = account.fetch_address || account.address;
       const recipient = account.fetch_address ? account.address : null;
       result = await fetchVerificationCode(mailbox, password, type, recipient);
     }
-    if (account.fail_count) db.prepare('UPDATE emails SET fail_count = 0 WHERE id = ?').run(account.id);
-    logQuery(account, label, type, result, true, null, requestedBy);
+    if (account.fail_count) await db('emails').where('id', account.id).update({ fail_count: 0 });
+    await logQuery(account, label, type, result, true, null, requestedBy);
 
     if (!result) return res.json({ code: 200, message: 'no new message', data: null });
     return res.json({
@@ -64,33 +65,48 @@ async function runFetch(res, account, type, label, requestedBy) {
       data: { code: result.code, subject: result.subject, body: result.body, from: result.from, date: result.date },
     });
   } catch (err) {
-    markError(account, err.message);
-    logQuery(account, label, type, null, false, err.message, requestedBy);
+    await markError(account, err.message);
+    await logQuery(account, label, type, null, false, err.message, requestedBy);
     return res.json({ code: 500, message: err.message });
   }
 }
 
-// 接码：两种方式
-//   1) token 方式（无需登录）：?token=<我方签发的账号令牌>&type=
-//   2) 邮箱方式（需身份）：    ?email=<地址>&type=  + Authorization: Bearer <登录JWT 或 用户API Key>
-//      单团队：登录用户均可对账号池中的邮箱取码。
+function checkAppKeyAccess(appKey, account) {
+  const scope = typeof appKey.allowed_accounts === 'string'
+    ? JSON.parse(appKey.allowed_accounts) : (appKey.allowed_accounts || {});
+  if (!scope.scope || scope.scope === 'all') return true;
+  if (scope.account_ids && Array.isArray(scope.account_ids)) {
+    return scope.account_ids.includes(account.id);
+  }
+  return false;
+}
+
 router.get('/', async (req, res) => {
   const { token, email, type = 'gpt' } = req.query;
 
   if (token) {
-    const account = db.prepare('SELECT * FROM emails WHERE token_hash = ?').get(hashToken(token));
+    const account = await db('emails').where('token_hash', hashToken(token)).first();
     if (!account) return res.json({ code: 401, message: '无效的令牌' });
     return runFetch(res, account, type, maskToken(token), null);
   }
 
   if (email) {
-    const principal = resolvePrincipal(req);
-    if (!principal) return res.json({ code: 401, message: '按邮箱取码需登录或提供 API Key' });
-    const account = db.prepare('SELECT * FROM emails WHERE address = ?').get(email);
+    const identity = await resolveIdentity(req);
+    if (!identity) return res.json({ code: 401, message: '按邮箱取码需登录或提供 API Key / App Key' });
+
+    const account = await db('emails').where('address', email).first();
     if (!account) return res.json({ code: 404, message: '账号不存在' });
-    // 访问控制：admin / 自己添加(owner) / 被分配(grant) 才能取码
+
+    if (req.appKey) {
+      if (!checkAppKeyAccess(req.appKey, account)) {
+        return res.json({ code: 403, message: '该 App Key 无权访问此账号' });
+      }
+      return runFetch(res, account, type, `[appkey:${req.appKey.key_prefix}]`, null);
+    }
+
+    const principal = req.user;
     const canAccess = principal.role === 'admin' || account.created_by === principal.id
-      || db.prepare('SELECT 1 FROM account_grants WHERE account_id = ? AND user_id = ?').get(account.id, principal.id);
+      || await db('account_grants').where({ account_id: account.id, user_id: principal.id }).first();
     if (!canAccess) return res.json({ code: 403, message: '无权访问该账号' });
     return runFetch(res, account, type, account.token_prefix || '(email)', principal.id);
   }

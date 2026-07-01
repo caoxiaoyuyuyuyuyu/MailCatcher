@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import Knex from 'knex';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { mkdirSync } from 'fs';
@@ -8,169 +8,233 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.MAILCATCHER_DATA_DIR || join(__dirname, '..', 'data');
 mkdirSync(DATA_DIR, { recursive: true });
 
-const db = new Database(join(DATA_DIR, 'mailcatcher.db'));
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+const DB_BACKEND = process.env.DB_BACKEND || 'sqlite';
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS teams (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT UNIQUE NOT NULL,
-    remark TEXT DEFAULT '',
-    created_at DATETIME DEFAULT (datetime('now'))
-  );
+const knexConfig = DB_BACKEND === 'postgres' ? {
+  client: 'pg',
+  connection: process.env.DATABASE_URL || {
+    host: process.env.PG_HOST || 'localhost',
+    port: Number(process.env.PG_PORT || 5432),
+    user: process.env.PG_USER || 'mailcatcher',
+    password: process.env.PG_PASSWORD || '',
+    database: process.env.PG_DATABASE || 'mailcatcher',
+  },
+  pool: { min: 2, max: 20 },
+} : {
+  client: 'better-sqlite3',
+  connection: { filename: join(DATA_DIR, 'mailcatcher.db') },
+  useNullAsDefault: true,
+};
 
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    role TEXT DEFAULT 'member',
-    team_id INTEGER,
-    status INTEGER DEFAULT 1,
-    api_key_hash TEXT,
-    created_at DATETIME DEFAULT (datetime('now'))
-  );
+const db = Knex(knexConfig);
 
-  CREATE TABLE IF NOT EXISTS mail_servers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    domain TEXT NOT NULL UNIQUE,
-    host TEXT NOT NULL,
-    port INTEGER DEFAULT 993,
-    use_ssl INTEGER DEFAULT 1,
-    use_proxy INTEGER DEFAULT 0,
-    status INTEGER DEFAULT 1,
-    created_at DATETIME DEFAULT (datetime('now')),
-    updated_at DATETIME DEFAULT (datetime('now'))
-  );
+async function ensureSchema() {
+  if (DB_BACKEND === 'sqlite') {
+    await db.raw('PRAGMA journal_mode = WAL');
+    await db.raw('PRAGMA foreign_keys = ON');
+  }
 
-  -- emails = 账号表（账号管理系统的核心实体）
-  CREATE TABLE IF NOT EXISTS emails (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    address TEXT NOT NULL UNIQUE,
-    source TEXT DEFAULT 'self',            -- self（自管，本地 IMAP/mailcom）| forward（171mail 转发）
-    team_id INTEGER,                       -- 归属团队
-    assignee_id INTEGER,                   -- 领用者（null=空闲）
-    password_enc TEXT DEFAULT '',          -- 加密的 IMAP 密码（source=self）
-    appkey TEXT DEFAULT '',
-    forward_provider TEXT DEFAULT '',      -- 转发上游标识，如 171mail（source=forward）
-    forward_token_enc TEXT DEFAULT '',     -- 加密的上游 token（source=forward）
-    token_hash TEXT,                       -- 我们签发的查询令牌的 SHA-256（方案乙）
-    token_prefix TEXT DEFAULT '',          -- 令牌掩码，仅用于后台展示
-    health_status TEXT DEFAULT 'active',   -- active | error | banned | expired | disabled
-    fail_count INTEGER DEFAULT 0,          -- 连续失败次数（用于自动标记 error）
-    status INTEGER DEFAULT 1,              -- 启用开关（1 启用 / 0 停用）
-    batch_no TEXT DEFAULT '',
-    created_at DATETIME DEFAULT (datetime('now')),
-    updated_at DATETIME DEFAULT (datetime('now'))
-  );
+  if (!await db.schema.hasTable('teams')) {
+    await db.schema.createTable('teams', t => {
+      t.increments('id');
+      t.string('name').unique().notNullable();
+      t.text('remark').defaultTo('');
+      t.timestamp('created_at').defaultTo(db.fn.now());
+    });
+  }
 
-  CREATE TABLE IF NOT EXISTS account_status_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    account_id INTEGER,
-    from_status TEXT,
-    to_status TEXT,
-    changed_by INTEGER,                    -- user id；0/null 表示系统自动
-    reason TEXT DEFAULT '',
-    created_at DATETIME DEFAULT (datetime('now'))
-  );
+  if (!await db.schema.hasTable('users')) {
+    await db.schema.createTable('users', t => {
+      t.increments('id');
+      t.string('username').unique().notNullable();
+      t.text('password_hash').notNullable();
+      t.string('role', 20).defaultTo('member');
+      t.integer('team_id');
+      t.integer('status').defaultTo(1);
+      t.text('api_key_hash');
+      t.timestamp('created_at').defaultTo(db.fn.now());
+    });
+  }
 
-  CREATE TABLE IF NOT EXISTS email_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email_id INTEGER,
-    email_address TEXT,
-    team_id INTEGER,
-    requested_by INTEGER,
-    query_type TEXT,
-    query_token TEXT,                      -- 仅存掩码，不存明文令牌
-    subject TEXT,
-    code TEXT,
-    raw_body TEXT,
-    success INTEGER DEFAULT 0,
-    error_msg TEXT,
-    created_at DATETIME DEFAULT (datetime('now')),
-    FOREIGN KEY (email_id) REFERENCES emails(id)
-  );
-`);
+  if (!await db.schema.hasTable('mail_servers')) {
+    await db.schema.createTable('mail_servers', t => {
+      t.increments('id');
+      t.string('domain').unique().notNullable();
+      t.string('host').notNullable();
+      t.integer('port').defaultTo(993);
+      t.integer('use_ssl').defaultTo(1);
+      t.integer('use_proxy').defaultTo(0);
+      t.integer('status').defaultTo(1);
+      t.timestamp('created_at').defaultTo(db.fn.now());
+      t.timestamp('updated_at').defaultTo(db.fn.now());
+    });
+  }
 
-// ── 幂等迁移：为已存在的旧库补齐新列 ─────────────────────
-function addColumnIfMissing(table, col, def) {
-  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name);
-  if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+  if (!await db.schema.hasTable('emails')) {
+    await db.schema.createTable('emails', t => {
+      t.increments('id');
+      t.string('address').unique().notNullable();
+      t.string('source', 20).defaultTo('self');
+      t.integer('team_id');
+      t.integer('assignee_id');
+      t.text('password_enc').defaultTo('');
+      t.string('appkey').defaultTo('');
+      t.string('forward_provider').defaultTo('');
+      t.text('forward_token_enc').defaultTo('');
+      t.text('token_hash');
+      t.string('token_prefix').defaultTo('');
+      t.string('health_status', 20).defaultTo('active');
+      t.integer('fail_count').defaultTo(0);
+      t.integer('status').defaultTo(1);
+      t.string('batch_no').defaultTo('');
+      t.text('fetch_address').defaultTo('');
+      t.integer('created_by');
+      t.integer('shared').defaultTo(0);
+      t.string('purchaser').defaultTo('');
+      t.integer('invoiced').defaultTo(0);
+      t.timestamp('created_at').defaultTo(db.fn.now());
+      t.timestamp('updated_at').defaultTo(db.fn.now());
+    });
+  }
+
+  if (!await db.schema.hasTable('account_status_logs')) {
+    await db.schema.createTable('account_status_logs', t => {
+      t.increments('id');
+      t.integer('account_id');
+      t.string('from_status', 20);
+      t.string('to_status', 20);
+      t.integer('changed_by');
+      t.text('reason').defaultTo('');
+      t.timestamp('created_at').defaultTo(db.fn.now());
+    });
+  }
+
+  if (!await db.schema.hasTable('email_logs')) {
+    await db.schema.createTable('email_logs', t => {
+      t.increments('id');
+      t.integer('email_id').references('id').inTable('emails');
+      t.string('email_address');
+      t.integer('team_id');
+      t.integer('requested_by');
+      t.string('query_type');
+      t.text('query_token');
+      t.text('subject');
+      t.text('code');
+      t.text('raw_body');
+      t.integer('success').defaultTo(0);
+      t.text('error_msg');
+      t.timestamp('created_at').defaultTo(db.fn.now());
+    });
+  }
+
+  if (!await db.schema.hasTable('account_grants')) {
+    await db.schema.createTable('account_grants', t => {
+      t.increments('id');
+      t.integer('account_id').notNullable();
+      t.integer('user_id').notNullable();
+      t.integer('granted_by');
+      t.timestamp('created_at').defaultTo(db.fn.now());
+      t.unique(['account_id', 'user_id']);
+    });
+  }
+
+  if (!await db.schema.hasTable('app_keys')) {
+    await db.schema.createTable('app_keys', t => {
+      t.increments('id');
+      t.string('name').notNullable();
+      t.text('key_hash').notNullable().unique();
+      t.text('secret_hash').notNullable();
+      t.string('key_prefix', 30).defaultTo('');
+      t.json('permissions').defaultTo('{}');
+      t.json('rate_limit').defaultTo('{}');
+      t.json('allowed_accounts').defaultTo('{}');
+      t.string('status', 20).defaultTo('active');
+      t.integer('created_by').references('id').inTable('users');
+      t.timestamp('created_at').defaultTo(db.fn.now());
+      t.timestamp('updated_at').defaultTo(db.fn.now());
+    });
+  }
+
+  // Add columns if missing (for upgrades from older versions)
+  const addCol = async (table, col, builder) => {
+    if (!await db.schema.hasColumn(table, col)) {
+      await db.schema.alterTable(table, t => builder(t));
+    }
+  };
+  for (const [col, fn] of [
+    ['role', t => t.string('role', 20).defaultTo('member')],
+    ['team_id', t => t.integer('team_id')],
+    ['status', t => t.integer('status').defaultTo(1)],
+    ['api_key_hash', t => t.text('api_key_hash')],
+  ]) await addCol('users', col, fn);
+
+  for (const [col, fn] of [
+    ['source', t => t.string('source', 20).defaultTo('self')],
+    ['team_id', t => t.integer('team_id')],
+    ['assignee_id', t => t.integer('assignee_id')],
+    ['password_enc', t => t.text('password_enc').defaultTo('')],
+    ['fetch_address', t => t.text('fetch_address').defaultTo('')],
+    ['forward_provider', t => t.string('forward_provider').defaultTo('')],
+    ['forward_token_enc', t => t.text('forward_token_enc').defaultTo('')],
+    ['token_hash', t => t.text('token_hash')],
+    ['token_prefix', t => t.string('token_prefix').defaultTo('')],
+    ['health_status', t => t.string('health_status', 20).defaultTo('active')],
+    ['fail_count', t => t.integer('fail_count').defaultTo(0)],
+    ['created_by', t => t.integer('created_by')],
+    ['shared', t => t.integer('shared').defaultTo(0)],
+    ['purchaser', t => t.string('purchaser').defaultTo('')],
+    ['invoiced', t => t.integer('invoiced').defaultTo(0)],
+  ]) await addCol('emails', col, fn);
+
+  for (const [col, fn] of [
+    ['team_id', t => t.integer('team_id')],
+    ['requested_by', t => t.integer('requested_by')],
+  ]) await addCol('email_logs', col, fn);
+
+  // Indexes
+  if (DB_BACKEND === 'sqlite') {
+    await db.raw('CREATE INDEX IF NOT EXISTS idx_emails_token_hash ON emails(token_hash)');
+    await db.raw('CREATE INDEX IF NOT EXISTS idx_emails_created_by ON emails(created_by)');
+    await db.raw('CREATE INDEX IF NOT EXISTS idx_grants_user ON account_grants(user_id)');
+    await db.raw('CREATE INDEX IF NOT EXISTS idx_grants_account ON account_grants(account_id)');
+    await db.raw('CREATE INDEX IF NOT EXISTS idx_app_keys_key_hash ON app_keys(key_hash)');
+  }
 }
 
-for (const [col, def] of [
-  ['role', "TEXT DEFAULT 'member'"],
-  ['team_id', 'INTEGER'],
-  ['status', 'INTEGER DEFAULT 1'],
-  ['api_key_hash', 'TEXT'],
-]) addColumnIfMissing('users', col, def);
-
-for (const [col, def] of [
-  ['source', "TEXT DEFAULT 'self'"],
-  ['team_id', 'INTEGER'],
-  ['assignee_id', 'INTEGER'],
-  ['password_enc', "TEXT DEFAULT ''"],
-  ['fetch_address', "TEXT DEFAULT ''"],
-  ['forward_provider', "TEXT DEFAULT ''"],
-  ['forward_token_enc', "TEXT DEFAULT ''"],
-  ['token_hash', 'TEXT'],
-  ['token_prefix', "TEXT DEFAULT ''"],
-  ['health_status', "TEXT DEFAULT 'active'"],
-  ['fail_count', 'INTEGER DEFAULT 0'],
-  ['created_by', 'INTEGER'],            // 添加人(归属)；NULL=历史账号(仅 admin 可见)
-  ['shared', 'INTEGER DEFAULT 0'],      // 0=独占(Claude,单人) 1=共享(Codex,可多人)
-  ['purchaser', "TEXT DEFAULT ''"],     // 购买人(谁出钱买的号)
-  ['invoiced', 'INTEGER DEFAULT 0'],    // 购买状态：0=未开发票 1=已开发票
-]) addColumnIfMissing('emails', col, def);
-
-for (const [col, def] of [
-  ['team_id', 'INTEGER'],
-  ['requested_by', 'INTEGER'],
-]) addColumnIfMissing('email_logs', col, def);
-
-// 索引：必须在补齐新列之后创建（旧库升级路径下列才存在）
-db.exec(`
-  CREATE TABLE IF NOT EXISTS account_grants (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    account_id INTEGER NOT NULL,
-    user_id INTEGER NOT NULL,
-    granted_by INTEGER,
-    created_at DATETIME DEFAULT (datetime('now')),
-    UNIQUE(account_id, user_id)
-  );
-  CREATE INDEX IF NOT EXISTS idx_emails_token_hash ON emails(token_hash);
-  CREATE INDEX IF NOT EXISTS idx_emails_created_by ON emails(created_by);
-  CREATE INDEX IF NOT EXISTS idx_grants_user ON account_grants(user_id);
-  CREATE INDEX IF NOT EXISTS idx_grants_account ON account_grants(account_id);
-`);
-
-// ── 一次性回填：把旧版明文 token/password 迁移到 token_hash/password_enc ──
-// 幂等：仅处理新字段为空、且旧列存在且有值的行；让升级前已有账号原样继续可用。
-(function backfillLegacyAccounts() {
-  const cols = db.prepare('PRAGMA table_info(emails)').all().map(c => c.name);
-  const hasLegacyToken = cols.includes('token');
-  const hasLegacyPass = cols.includes('password');
+async function backfillLegacy() {
+  const hasLegacyToken = await db.schema.hasColumn('emails', 'token');
+  const hasLegacyPass = await db.schema.hasColumn('emails', 'password');
   if (!hasLegacyToken && !hasLegacyPass) return;
 
-  const sel = `SELECT id, token_hash, password_enc,
-                 ${hasLegacyToken ? 'token' : "'' AS token"},
-                 ${hasLegacyPass ? 'password' : "'' AS password"}
-               FROM emails`;
-  const updTok = db.prepare("UPDATE emails SET token_hash = ?, token_prefix = ? WHERE id = ?");
-  const updPwd = db.prepare("UPDATE emails SET password_enc = ? WHERE id = ?");
-  const tx = db.transaction(() => {
-    for (const r of db.prepare(sel).all()) {
-      if (!r.token_hash && r.token) updTok.run(hashToken(r.token), maskToken(r.token), r.id);
-      if ((!r.password_enc || r.password_enc === '') && r.password) updPwd.run(encrypt(r.password), r.id);
+  const rows = await db('emails').select('id', 'token_hash', 'password_enc',
+    ...(hasLegacyToken ? [db.raw('"token"')] : [db.raw("'' as token")]),
+    ...(hasLegacyPass ? [db.raw('"password"')] : [db.raw("'' as password")])
+  );
+  for (const r of rows) {
+    if (!r.token_hash && r.token) {
+      await db('emails').where('id', r.id).update({ token_hash: hashToken(r.token), token_prefix: maskToken(r.token) });
     }
-  });
-  tx();
-})();
+    if ((!r.password_enc || r.password_enc === '') && r.password) {
+      await db('emails').where('id', r.id).update({ password_enc: encrypt(r.password) });
+    }
+  }
+}
 
-// ── 种子：默认团队 ───────────────────────────────────────
-const hasTeam = db.prepare('SELECT id FROM teams LIMIT 1').get();
-if (!hasTeam) {
-  db.prepare('INSERT INTO teams (name, remark) VALUES (?, ?)').run('默认团队', '系统默认团队');
+async function seedDefaults() {
+  const hasTeam = await db('teams').first();
+  if (!hasTeam) {
+    await db('teams').insert({ name: '默认团队', remark: '系统默认团队' });
+  }
+}
+
+export async function initDb() {
+  await ensureSchema();
+  await backfillLegacy();
+  await seedDefaults();
+}
+
+export function hasLegacyTokenColumn() {
+  return db.schema.hasColumn('emails', 'token');
 }
 
 export default db;

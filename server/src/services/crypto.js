@@ -45,6 +45,14 @@ export function hashToken(token) {
   return crypto.createHash('sha256').update(String(token)).digest('hex');
 }
 
+export function generateAppKey() {
+  return 'ak_' + crypto.randomBytes(20).toString('hex');
+}
+
+export function generateAppSecret() {
+  return 'sk_' + crypto.randomBytes(32).toString('hex');
+}
+
 export function maskToken(token) {
   if (!token) return '';
   const t = String(token);

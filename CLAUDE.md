@@ -82,7 +82,7 @@ rebase 发生冲突时：
 
 MailCatcher 已从「纯接码工具」演进为「**多租户账号管理 + 统一接码网关**」。
 
-- **后端**: Node.js + Express + SQLite (better-sqlite3) + imapflow + playwright-core
+- **后端**: Node.js + Express + Knex.js（支持 SQLite/PostgreSQL 双后端）+ imapflow + playwright-core
 - **前端**: Vue 3 + Element Plus (CDN 模式，单 HTML 文件)
 - **单团队 + 两级角色**: 一个服务一个团队；users 仅 `admin` / `member`。账号**按归属隔离**：任何登录用户都能自助添加账号（成为 `created_by` 归属人），只看到「自己添加的 + 被分配给自己的」；admin 看全部、管用户。管理员可升降级他人
 - **账号归属/分配**: 每个账号有归属人 `created_by` 和共享标志 `shared`(0=独占,如 Claude 单人；1=共享,如 Codex 多人)。归属人或 admin 可把账号**分配**给其他用户(`account_grants` 表，独占账号再分配会替换原有单人，共享账号可多人)。能「使用」(浏览/取码)= admin/owner/被授予；能「管理」(改删/轮换/状态/分配)= admin/owner
@@ -90,7 +90,8 @@ MailCatcher 已从「纯接码工具」演进为「**多租户账号管理 + 统
 - **账号来源(source)**:
   - `self` — 自管邮箱，本地 IMAP/mailcom 取码（密码 AES-GCM 加密存）；可设 `fetch_address`(实际收件邮箱)与展示 `address` 分离——如 Codex 用 Outlook 订阅(展示)、验证码转发到公司 mail.com(收件)，取码时按转发邮件正文里的 `To:<原 Outlook>` 过滤区分
   - `forward` — 171mail 账号，转发到 `b.171mail.com/api/v1/message`（上游 token 加密存）
-- **统一接码**: `GET /api/v1/message?token=&type=` 按 source 分发；对外只认我方签发 token(存 hash)
+- **App Key（外部系统接入）**: 管理员可创建 App Key（`ak_xxx` + `sk_xxx`），外部系统通过 `Authorization: Bearer ak:sk` 调用 API 接码。每个 App Key 可配账号范围、状态(active/disabled)，支持轮换。`app_keys` 表存 hash，明文仅创建/轮换时返回一次
+- **统一接码**: `GET /api/v1/message?token=&type=` 按 source 分发；对外只认我方签发 token(存 hash)；也支持 App Key 认证
 - **状态系统**: 健康轴 `health_status`(active/error/banned/expired/disabled) + 归属/分配轴(`created_by` + `account_grants`)，
   变更记 `account_status_logs`；连续取码失败自动标 error
 - **核心流程**: 我方 token → token_hash 查账号 → 按 source 走本地/转发 → 提取验证码
@@ -105,13 +106,14 @@ MailCatcher 已从「纯接码工具」演进为「**多租户账号管理 + 统
 - `server/src/services/mailcom.js` — mail.com Web API 抓取（self 账号）
 - `server/src/services/forward171.js` — 171mail 转发适配器（forward 账号）
 - `server/src/services/crypto.js` — AES-256-GCM 加解密 + token hash（方案乙）
-- `server/src/middleware/auth.js` — JWT + requireRole(admin/member) + resolvePrincipal
+- `server/src/middleware/auth.js` — JWT + requireRole(admin/member) + resolvePrincipal + resolveAppKey + resolveIdentity
 - `server/src/routes/message.js` — 接码 API (`/api/v1/message`)，按 source 分发本地/转发
 - `server/src/services/codexLogin.js` + `routes/codex.js` — 触发 OpenAI/Codex 邮箱 OTP 登录发码（`POST /api/v1/codex/send`）
 - `server/src/routes/emails.js` — 账号 CRUD（source/状态机/归属/分配 grant·revoke/token 轮换/购买人 `purchaser`+发票状态 `invoiced`；列表按归属过滤，增删改/分配限 owner 或 admin）
 - `server/src/routes/users.js` — 用户管理（admin 升降级/重置/删除；防自锁）；`GET /options`(任何登录用户) 供分配下拉用
+- `server/src/routes/appKeys.js` — App Key CRUD（admin 创建/编辑/轮换/删除，外部系统凭证管理）
 - `server/src/routes/mailServers.js` — IMAP 服务器配置
-- `server/src/db.js` — SQLite schema（账号来源 + 状态系统）
+- `server/src/db.js` — Knex 初始化 + schema 管理（支持 SQLite/PostgreSQL 双后端，`DB_BACKEND` 环境变量切换）
 - `server/test/run-tests.mjs` — 集成测试（内置 mock171），`npm test`
 - `server/public/index.html` — 完整前端 UI
 
@@ -133,11 +135,13 @@ mailcatcher log list / clear            # 日志管理
 - 完成任务后确保代码可运行、测试通过（`cd server && npm test`）
 - Gmail/Outlook 等需要应用专用密码，不能用登录密码
 - IMAP 查询只搜索最近 10 分钟的邮件
+- **数据库**：默认 SQLite（`DB_BACKEND=sqlite`），可切换 PostgreSQL（`DB_BACKEND=postgres`）。PG 配置通过 `DATABASE_URL` 或 `PG_HOST/PG_PORT/PG_USER/PG_PASSWORD/PG_DATABASE`
+- **App Key 外部接入**：管理员在「App Key」页创建凭证；外部系统用 `Authorization: Bearer ak_xxx:sk_xxx` 调接码 API（`/api/v1/message?email=xxx&type=gpt`）。可配账号范围（全部/指定 ID），支持启用/禁用/轮换
 - **环境变量**：生产必须设置 `ENCRYPTION_KEY`（加密 IMAP 密码/171mail token）与 `JWT_SECRET`；缺省会告警
 - **账号来源**：`source=self` 走本地 IMAP/mailcom；`source=forward` 转发到 171mail（密文存上游 token）
 - **方案乙**：所有账号对外都用我方签发的 token（库内存 hash，创建/轮换时明文仅显示一次）
 - **默认管理员**：admin / admin123，角色 `admin`（旧库 super_admin/team_admin 启动时自动迁移为 admin）
 - **自助注册**：`POST /api/admin/register`（公开），邮箱须 `@apexin.ai` 后缀 + 密码二次确认（≥6 位）；注册即 `member`，登录后由管理员在用户管理升级为 admin。邮箱登录大小写不敏感
-- **前端导航按角色显隐**：member 只见「在线接码 + 账号管理」（登录落地账号管理）；admin 另见控制台/用户管理/服务配置/查询日志/个人。账号页：任何人都能加账号/导入/删自己的；每行按 `can_manage` 显示编辑/状态/分配/删除按钮；「分配」弹窗按 `/api/admin/user/options` 选用户，调 `grant`/`revoke`
+- **前端导航按角色显隐**：member 只见「在线接码 + 账号管理」（登录落地账号管理）；admin 另见控制台/用户管理/App Key/服务配置/查询日志/个人。账号页：任何人都能加账号/导入/删自己的；每行按 `can_manage` 显示编辑/状态/分配/删除按钮；「分配」弹窗按 `/api/admin/user/options` 选用户，调 `grant`/`revoke`
 - **Codex 登录触发**：`POST /api/v1/codex/send`（需登录）用无头浏览器在 chatgpt.com 提交邮箱 → OpenAI 给该邮箱发「临时登录代码」（纯邮箱 OTP、无需密码、实测未遇验证码拦截）；再配合 self+`fetch_address` 转发收件箱把码取回。前端「在线接码」邮箱模式有「发送 Codex 登录码并自动取码」一键按钮。⚠ 依赖 OpenAI 登录页结构，可能随其改版/加强风控而失效
-- **可配置**：`MAILCATCHER_DATA_DIR`（DB 目录）、`FORWARD_171_BASE`（171mail 地址，测试用）、`REGISTER_EMAIL_SUFFIX`（注册邮箱后缀，默认 `@apexin.ai`）
+- **可配置**：`MAILCATCHER_DATA_DIR`（DB 目录）、`FORWARD_171_BASE`（171mail 地址，测试用）、`REGISTER_EMAIL_SUFFIX`（注册邮箱后缀，默认 `@apexin.ai`）、`DB_BACKEND`（`sqlite` 或 `postgres`）、`DATABASE_URL`（PostgreSQL 连接串）
