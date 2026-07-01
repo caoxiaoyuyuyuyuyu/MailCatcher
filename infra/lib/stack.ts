@@ -150,6 +150,7 @@ export class MailCatcherStack extends cdk.Stack {
 
     const targetGroup = listener.addTargets('Backend', {
       port: 3000,
+      protocol: elbv2.ApplicationProtocol.HTTP,
       targets: [service],
       healthCheck: {
         path: '/healthz',
