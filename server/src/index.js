@@ -24,6 +24,8 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
+app.get('/healthz', (req, res) => res.json({ status: 'ok' }));
+
 app.use('/api/admin', authRoutes);
 app.use('/api/admin/user', userRoutes);
 app.use('/api/admin/email', emailRoutes);

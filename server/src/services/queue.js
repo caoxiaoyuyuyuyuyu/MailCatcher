@@ -42,7 +42,12 @@ async function markError(account, reason) {
 
 async function processFetchJob(job) {
   const { accountId, type, label, requestedBy } = job.data;
-  const account = await db('emails').where('id', accountId).first();
+  let account;
+  for (let i = 0; i < 5; i++) {
+    account = await db('emails').where('id', accountId).first();
+    if (account) break;
+    await new Promise(r => setTimeout(r, 100));
+  }
   if (!account) throw new Error('账号不存在');
   if (account.status !== 1) return { code: 403, message: '账号已停用' };
   const BLOCKED = new Set(['banned', 'expired', 'disabled']);
@@ -95,6 +100,8 @@ export async function enqueueFetch({ accountId, type, label, requestedBy }) {
   const job = await fetchQueue.add('fetch', { accountId, type, label, requestedBy }, {
     removeOnComplete: { age: 300 },
     removeOnFail: { age: 600 },
+    attempts: 3,
+    backoff: { type: 'fixed', delay: 200 },
   });
   return job.id;
 }
@@ -107,7 +114,7 @@ export async function waitForResult(jobId, timeoutMs = 60000) {
     const state = await job.getState();
     if (state === 'completed') return job.returnvalue;
     if (state === 'failed') return { code: 500, message: job.failedReason || '取码失败' };
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise(r => setTimeout(r, 200));
   }
   return { code: 202, message: '任务仍在处理中，请稍后查询' };
 }
