@@ -1,5 +1,21 @@
 import { ImapFlow } from 'imapflow';
+import { resolveMx } from 'node:dns/promises';
 import db from '../db.js';
+
+const mxCache = new Map();
+
+async function isMxMailcom(domain) {
+  if (mxCache.has(domain)) return mxCache.get(domain);
+  try {
+    const records = await resolveMx(domain);
+    const hit = records.some(r => r.exchange.toLowerCase().endsWith('.mail.com'));
+    mxCache.set(domain, hit);
+    return hit;
+  } catch {
+    mxCache.set(domain, false);
+    return false;
+  }
+}
 
 function getServerConfig(emailAddress) {
   const domain = emailAddress.split('@')[1]?.toLowerCase();
@@ -101,15 +117,15 @@ const MAILCOM_DOMAINS = new Set([
   'artlover.com', 'activist.com',
 ]);
 
-function isMailcomDomain(emailAddress) {
+async function isMailcomDomain(emailAddress) {
   const domain = emailAddress.split('@')[1]?.toLowerCase();
-  return domain && (MAILCOM_DOMAINS.has(domain) || domain.endsWith('.mail.com'));
+  if (!domain) return false;
+  if (MAILCOM_DOMAINS.has(domain) || domain.endsWith('.mail.com')) return true;
+  return isMxMailcom(domain);
 }
 
-// recipient（可选）：转发收件箱场景下，按原始收件人（展示邮箱）过滤——
-// 转发邮件正文会保留 "To: <原邮箱>"，据此区分同一收件箱里不同账号的验证码。
 export async function fetchVerificationCode(emailAddress, password, type, recipient) {
-  if (isMailcomDomain(emailAddress)) {
+  if (await isMailcomDomain(emailAddress)) {
     return fetchViaWebApi(emailAddress, password, type, recipient);
   }
   return fetchViaImap(emailAddress, password, type, recipient);
