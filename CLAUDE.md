@@ -91,10 +91,10 @@ MailCatcher 已从「纯接码工具」演进为「**多租户账号管理 + 统
   - `self` — 自管邮箱，本地 IMAP/mailcom 取码（密码 AES-GCM 加密存）；可设 `fetch_address`(实际收件邮箱)与展示 `address` 分离——如 Codex 用 Outlook 订阅(展示)、验证码转发到公司 mail.com(收件)，取码时按转发邮件正文里的 `To:<原 Outlook>` 过滤区分
   - `forward` — 171mail 账号，转发到 `b.171mail.com/api/v1/message`（上游 token 加密存）
 - **App Key（外部系统接入）**: 管理员可创建 App Key（`ak_xxx` + `sk_xxx`），外部系统通过 `Authorization: Bearer ak:sk` 调用 API 接码。每个 App Key 可配账号范围、状态(active/disabled)，支持轮换。`app_keys` 表存 hash，明文仅创建/轮换时返回一次
-- **统一接码**: `GET /api/v1/message?token=&type=` 按 source 分发；对外只认我方签发 token(存 hash)；也支持 App Key 认证
+- **统一接码**: `GET /api/v1/message?token=&type=` 同步取码（兼容）；`POST /api/v1/message/async` 异步取码返回 `taskId`，`GET /api/v1/message/task/:taskId` 轮询结果。所有取码通过 BullMQ + Redis 队列处理，支持高并发和 worker 水平扩展
 - **状态系统**: 健康轴 `health_status`(active/error/banned/expired/disabled) + 归属/分配轴(`created_by` + `account_grants`)，
   变更记 `account_status_logs`；连续取码失败自动标 error
-- **核心流程**: 我方 token → token_hash 查账号 → 按 source 走本地/转发 → 提取验证码
+- **核心流程**: 认证 → 查账号 → BullMQ 入队 → Worker 按 source 走本地/转发 → 提取验证码
 - **启动**: `cd server && npm start` → `http://localhost:3000`
 - **测试**: `cd server && npm test`
 - **默认管理员**: admin / admin123（角色 `admin`）
@@ -107,7 +107,8 @@ MailCatcher 已从「纯接码工具」演进为「**多租户账号管理 + 统
 - `server/src/services/forward171.js` — 171mail 转发适配器（forward 账号）
 - `server/src/services/crypto.js` — AES-256-GCM 加解密 + token hash（方案乙）
 - `server/src/middleware/auth.js` — JWT + requireRole(admin/member) + resolvePrincipal + resolveAppKey + resolveIdentity
-- `server/src/routes/message.js` — 接码 API (`/api/v1/message`)，按 source 分发本地/转发
+- `server/src/services/queue.js` — BullMQ 取码队列 + Worker（Redis 驱动，并发可配 `FETCH_CONCURRENCY`）
+- `server/src/routes/message.js` — 接码 API：同步 `GET /message`、异步 `POST /message/async`、轮询 `GET /message/task/:id`
 - `server/src/services/codexLogin.js` + `routes/codex.js` — 触发 OpenAI/Codex 邮箱 OTP 登录发码（`POST /api/v1/codex/send`）
 - `server/src/routes/emails.js` — 账号 CRUD（source/状态机/归属/分配 grant·revoke/token 轮换/购买人 `purchaser`+发票状态 `invoiced`；列表按归属过滤，增删改/分配限 owner 或 admin）
 - `server/src/routes/users.js` — 用户管理（admin 升降级/重置/删除；防自锁）；`GET /options`(任何登录用户) 供分配下拉用
@@ -144,4 +145,4 @@ mailcatcher log list / clear            # 日志管理
 - **自助注册**：`POST /api/admin/register`（公开），邮箱须 `@apexin.ai` 后缀 + 密码二次确认（≥6 位）；注册即 `member`，登录后由管理员在用户管理升级为 admin。邮箱登录大小写不敏感
 - **前端导航按角色显隐**：member 只见「在线接码 + 账号管理」（登录落地账号管理）；admin 另见控制台/用户管理/App Key/服务配置/查询日志/个人。账号页：任何人都能加账号/导入/删自己的；每行按 `can_manage` 显示编辑/状态/分配/删除按钮；「分配」弹窗按 `/api/admin/user/options` 选用户，调 `grant`/`revoke`
 - **Codex 登录触发**：`POST /api/v1/codex/send`（需登录）用无头浏览器在 chatgpt.com 提交邮箱 → OpenAI 给该邮箱发「临时登录代码」（纯邮箱 OTP、无需密码、实测未遇验证码拦截）；再配合 self+`fetch_address` 转发收件箱把码取回。前端「在线接码」邮箱模式有「发送 Codex 登录码并自动取码」一键按钮。⚠ 依赖 OpenAI 登录页结构，可能随其改版/加强风控而失效
-- **可配置**：`MAILCATCHER_DATA_DIR`（DB 目录）、`FORWARD_171_BASE`（171mail 地址，测试用）、`REGISTER_EMAIL_SUFFIX`（注册邮箱后缀，默认 `@apexin.ai`）、`DB_BACKEND`（`sqlite` 或 `postgres`）、`DATABASE_URL`（PostgreSQL 连接串）
+- **可配置**：`MAILCATCHER_DATA_DIR`（DB 目录）、`FORWARD_171_BASE`（171mail 地址，测试用）、`REGISTER_EMAIL_SUFFIX`（注册邮箱后缀，默认 `@apexin.ai`）、`DB_BACKEND`（`sqlite` 或 `postgres`）、`DATABASE_URL`（PostgreSQL 连接串）、`REDIS_URL`（Redis 地址，默认 `redis://127.0.0.1:6379`）、`FETCH_CONCURRENCY`（Worker 并发数，默认 20）

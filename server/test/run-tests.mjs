@@ -167,6 +167,23 @@ try {
   // 删除 App Key
   ok((await api('DELETE', `/api/admin/app-keys/delete/${akId}`, null, ADMIN)).code === 200, 'App Key 删除成功');
 
+  console.log('## 异步取码队列');
+  // 异步提交取码任务
+  const asyncRes = await api('POST', '/api/v1/message/async', { email: 'fwd@priest.com', type: 'claude' }, ADMIN);
+  ok(asyncRes.code === 200 && asyncRes.data.taskId, '异步提交返回 taskId');
+  // 等待并查询结果
+  let taskResult;
+  for (let i = 0; i < 20; i++) {
+    await new Promise(r => setTimeout(r, 500));
+    taskResult = await api('GET', `/api/v1/message/task/${asyncRes.data.taskId}`);
+    if (taskResult.code !== 202) break;
+  }
+  ok(taskResult?.data?.code?.includes('magic-link'), '异步取码任务完成并取到 magic-link');
+  // 查询不存在的任务
+  ok((await api('GET', '/api/v1/message/task/nonexistent-id-123')).code === 404, '查询不存在的任务返回 404');
+  // 未登录不能异步提交
+  ok((await api('POST', '/api/v1/message/async', { email: 'fwd@priest.com', type: 'claude' })).code === 401, '异步接码未登录被拒(401)');
+
   console.log(`\n=== RESULT: ${pass} passed, ${fail} failed ===`);
   teardown(fail ? 1 : 0);
 } catch (err) {

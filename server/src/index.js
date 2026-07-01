@@ -15,6 +15,7 @@ import codexRoutes from './routes/codex.js';
 import userRoutes from './routes/users.js';
 import appKeyRoutes from './routes/appKeys.js';
 import { authMiddleware } from './middleware/auth.js';
+import { startWorker } from './services/queue.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -53,6 +54,7 @@ app.get('*', (req, res) => {
 async function start() {
   await initDb();
   await ensureDefaultAdmin();
+  startWorker();
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`MailCatcher server running at http://0.0.0.0:${PORT}`);
     console.log(`Admin: http://localhost:${PORT}/admin`);
