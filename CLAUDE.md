@@ -135,7 +135,8 @@ mailcatcher log list / clear            # 日志管理
 - 在 worktree 中工作时，不要切换到其他分支
 - 完成任务后确保代码可运行、测试通过（`cd server && npm test`）
 - Gmail/Outlook 等需要应用专用密码，不能用登录密码
-- IMAP 查询只搜索最近 10 分钟的邮件
+- IMAP/mail.com 查询默认回溯最近 30 分钟的邮件（转发有延迟，`FETCH_LOOKBACK_MINUTES` 可调）
+- **转发发件人匹配**：转发邮件外层 `from` 会被改写成转发者地址，导致按发件人的类型过滤失效。`imap.js` 的 `messageMatchesType` 同时在 `from + subject + body` 里找已知发件地址（转发正文通常保留原始 `From:`），转发/直收都能命中
 - **数据库**：默认 SQLite（`DB_BACKEND=sqlite`），可切换 PostgreSQL（`DB_BACKEND=postgres`）。PG 配置通过 `DATABASE_URL` 或 `PG_HOST/PG_PORT/PG_USER/PG_PASSWORD/PG_DATABASE`
 - **App Key 外部接入**：管理员在「App Key」页创建凭证；外部系统用 `Authorization: Bearer ak_xxx:sk_xxx` 调接码 API（`/api/v1/message?email=xxx&type=gpt`）。可配账号范围（全部/指定 ID），支持启用/禁用/轮换
 - **环境变量**：生产必须设置 `ENCRYPTION_KEY`（加密 IMAP 密码/171mail token）与 `JWT_SECRET`；缺省会告警
@@ -145,4 +146,4 @@ mailcatcher log list / clear            # 日志管理
 - **自助注册**：`POST /api/admin/register`（公开），邮箱须 `@apexin.ai` 后缀 + 密码二次确认（≥6 位）；注册即 `member`，登录后由管理员在用户管理升级为 admin。邮箱登录大小写不敏感
 - **前端导航按角色显隐**：member 只见「在线接码 + 账号管理」（登录落地账号管理）；admin 另见控制台/用户管理/App Key/服务配置/查询日志/个人。账号页：任何人都能加账号/导入/删自己的；每行按 `can_manage` 显示编辑/状态/分配/删除按钮；「分配」弹窗按 `/api/admin/user/options` 选用户，调 `grant`/`revoke`
 - **Codex 登录触发**：`POST /api/v1/codex/send`（需登录）用无头浏览器在 chatgpt.com 提交邮箱 → OpenAI 给该邮箱发「临时登录代码」（纯邮箱 OTP、无需密码、实测未遇验证码拦截）；再配合 self+`fetch_address` 转发收件箱把码取回。前端「在线接码」邮箱模式有「发送 Codex 登录码并自动取码」一键按钮。⚠ 依赖 OpenAI 登录页结构，可能随其改版/加强风控而失效
-- **可配置**：`MAILCATCHER_DATA_DIR`（DB 目录）、`FORWARD_171_BASE`（171mail 地址，测试用）、`REGISTER_EMAIL_SUFFIX`（注册邮箱后缀，默认 `@apexin.ai`）、`DB_BACKEND`（`sqlite` 或 `postgres`）、`DATABASE_URL`（PostgreSQL 连接串）、`REDIS_URL`（Redis 地址，默认 `redis://127.0.0.1:6379`）、`FETCH_CONCURRENCY`（Worker 并发数，默认 20）
+- **可配置**：`MAILCATCHER_DATA_DIR`（DB 目录）、`FORWARD_171_BASE`（171mail 地址，测试用）、`REGISTER_EMAIL_SUFFIX`（注册邮箱后缀，默认 `@apexin.ai`）、`DB_BACKEND`（`sqlite` 或 `postgres`）、`DATABASE_URL`（PostgreSQL 连接串）、`REDIS_URL`（Redis 地址，默认 `redis://127.0.0.1:6379`）、`FETCH_CONCURRENCY`（Worker 并发数，默认 20）、`FETCH_LOOKBACK_MINUTES`（取码回溯时间窗，默认 30）、`MAILCOM_SCAN_LIMIT`（mail.com 每次扫描邮件数，默认 15）

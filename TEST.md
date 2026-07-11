@@ -5,11 +5,12 @@
 ```bash
 cd server
 npm install
-npm test        # 内置 mock 171mail，确定性运行；当前 31 项断言全绿
+npm test        # 先跑 imap-match 单元测试(7)，再跑集成测试(56)，均无需外网、确定性运行
 ```
 
 覆盖：加密往返 / token hash、登录与双角色(admin/member)、自助注册、forward 转发取码、
-**邮箱接码 + 用户 API Key**、成员权限隔离、管理员升降级(防自锁)、健康状态机、token 轮换、删除外键。
+**邮箱接码 + 用户 API Key**、成员权限隔离、管理员升降级(防自锁)、健康状态机、token 轮换、删除外键、
+**类型匹配 `messageMatchesType`（含转发外层发件人被改写、靠正文原始 `From:` 命中的场景）**。
 
 测试通过环境变量隔离：`MAILCATCHER_DATA_DIR`（临时库）、`FORWARD_171_BASE`（指向内置 mock）。
 

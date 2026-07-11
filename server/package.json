@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "test": "node test/run-tests.mjs"
+    "test": "node test/imap-match.test.mjs && node test/run-tests.mjs"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

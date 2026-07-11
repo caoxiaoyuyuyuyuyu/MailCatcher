@@ -110,6 +110,23 @@ function extractLink(text) {
   return linkMatch ? linkMatch[0] : null;
 }
 
+// 取码回溯时间窗（分钟）。转发有延迟，默认放宽到 30 分钟，可用 FETCH_LOOKBACK_MINUTES 覆盖
+export const LOOKBACK_MINUTES = Number(process.env.FETCH_LOOKBACK_MINUTES || 30);
+
+// 判断一封邮件是否命中指定类型。
+// 关键：转发后外层发件人会被改写成转发者地址，导致按 from 过滤失效。
+// 因此发件人匹配同时在 from + subject + body 里找已知发件地址——
+// 转发邮件正文通常保留原始「From: xxx@openai.com」，这样转发/直收都能命中。
+export function messageMatchesType(type, { from = '', subject = '', body = '' } = {}) {
+  if (type === 'all') return true;
+  const typeFilter = TYPE_FILTERS[type] || TYPE_FILTERS.gpt;
+  const haystack = `${from} ${subject} ${body}`.toLowerCase();
+  const fromMatch = typeFilter.from.length === 0 ||
+    typeFilter.from.some(f => haystack.includes(f.toLowerCase()));
+  const subjectMatch = typeFilter.subject.test(subject);
+  return fromMatch || subjectMatch;
+}
+
 const MAILCOM_DOMAINS = new Set([
   'mail.com', 'email.com', 'usa.com', 'consultant.com', 'europe.com',
   'asia.com', 'iname.com', 'writeme.com', 'dr.com', 'myself.com',
@@ -143,14 +160,8 @@ async function fetchViaWebApi(emailAddress, password, type, recipient) {
 
   if (!emails || emails.length === 0) return null;
 
-  const typeFilter = TYPE_FILTERS[type] || TYPE_FILTERS.gpt;
-
   for (const email of emails) {
-    const fromMatch = typeFilter.from.length === 0 ||
-      typeFilter.from.some(f => (email.from || '').toLowerCase().includes(f.toLowerCase()));
-    const subjectMatch = typeFilter.subject.test(email.subject || '');
-
-    if (!fromMatch && !subjectMatch && type !== 'all') continue;
+    if (!messageMatchesType(type, { from: email.from, subject: email.subject, body: email.body })) continue;
     if (!matchesRecipient(recipient, email.body, email.subject, email.from)) continue;
 
     const code = extractCode(email.body) || extractCode(email.subject);
@@ -199,10 +210,8 @@ async function fetchViaImap(emailAddress, password, type, recipient) {
     const lock = await client.getMailboxLock('INBOX');
 
     try {
-      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
-      const filter = type === 'all'
-        ? { since: tenMinutesAgo }
-        : { since: tenMinutesAgo };
+      const lookbackSince = new Date(Date.now() - LOOKBACK_MINUTES * 60 * 1000);
+      const filter = { since: lookbackSince };
 
       const messages = [];
       for await (const msg of client.fetch(filter, {
@@ -219,27 +228,32 @@ async function fetchViaImap(emailAddress, password, type, recipient) {
         return dateB - dateA;
       });
 
-      const typeFilter = TYPE_FILTERS[type] || TYPE_FILTERS.gpt;
-
       for (const msg of messages) {
         const fromAddr = msg.envelope?.from?.[0]?.address?.toLowerCase() || '';
         const subject = msg.envelope?.subject || '';
         const date = msg.envelope?.date;
 
-        if (date && new Date(date) < tenMinutesAgo) continue;
-
-        const fromMatch = typeFilter.from.length === 0 ||
-          typeFilter.from.some(f => fromAddr.includes(f.toLowerCase()));
-        const subjectMatch = typeFilter.subject.test(subject);
-
-        if (!fromMatch && !subjectMatch && type !== 'all') continue;
+        if (date && new Date(date) < lookbackSince) continue;
 
         let bodyText = '';
-        if (msg.source) {
-          const { simpleParser } = await import('mailparser');
-          const parsed = await simpleParser(msg.source);
-          bodyText = parsed.text || parsed.html || '';
+        let bodyParsed = false;
+        const parseBody = async () => {
+          if (bodyParsed) return;
+          bodyParsed = true;
+          if (msg.source) {
+            const { simpleParser } = await import('mailparser');
+            const parsed = await simpleParser(msg.source);
+            bodyText = parsed.text || parsed.html || '';
+          }
+        };
+
+        // 先用信封 from + 主题快速判断；不中再解析正文重试
+        // （转发邮件原始发件人在正文里，需要正文才能命中）
+        if (!messageMatchesType(type, { from: fromAddr, subject })) {
+          await parseBody();
+          if (!messageMatchesType(type, { from: fromAddr, subject, body: bodyText })) continue;
         }
+        await parseBody();
 
         if (!matchesRecipient(recipient, bodyText, subject, fromAddr)) continue;
 

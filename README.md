@@ -47,6 +47,8 @@ ENCRYPTION_KEY=请设置随机密钥 JWT_SECRET=请设置随机密钥 npm start
 | `forward` | 171mail 账号（上游 token 加密存） | 系统自动签发 | 转发到 `b.171mail.com/api/v1/message` |
 
 > **展示邮箱 ≠ 收件邮箱**：`self` 账号可设「收件邮箱」`fetch_address`。用于 Codex 这类——用 Outlook 邮箱订阅（展示用 Outlook），验证码转发到公司 mail.com（实际从 mail.com 取码）。多个 Outlook 共用一个 mail.com 收件箱时，按转发邮件里保留的原始 `To:` 自动区分。「收件密码」填收件邮箱的密码。
+>
+> **转发取码更稳**：转发会把邮件外层发件人改写成转发者地址，令按发件人的类型过滤（gpt/claude…）失效——现在同时从**正文里的原始 `From:`** 匹配发件人，转发/直收都能命中。取码回溯窗默认 30 分钟（`FETCH_LOOKBACK_MINUTES` 可调），mail.com 每次扫描 15 封（`MAILCOM_SCAN_LIMIT` 可调），避免转发延迟或共用箱刷屏导致漏码。
 
 > 不论哪种来源，对外都用 **MailCatcher 自己签发的查询令牌**（库内存 hash）；171mail 的上游 token 仅作内部加密凭证。
 

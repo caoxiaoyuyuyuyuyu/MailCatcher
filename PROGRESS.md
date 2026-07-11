@@ -45,3 +45,10 @@
 - **问题**：CCM 建 worktree 时把 `server/node_modules` 做成**符号链接**指向主仓库（共享依赖省空间）。`.gitignore` 写的是 `node_modules/`（带斜杠只匹配目录），**符号链接不匹配**，于是 `git add server/` 把这个 link 当普通文件提交了（mode 120000）。
 - **解决**：`git rm --cached server/node_modules` + 在 `.gitignore` 追加不带斜杠的 `server/node_modules`，`git commit --amend`。
 - **避免**：提交前看 `git status --short`，出现 `node_modules`/`.venv` 等依赖目录立刻警觉；`.gitignore` 对「可能是符号链接」的路径别只写带斜杠的目录形式。`git ls-files | grep node_modules` 可快速自查是否误track。
+
+## 转发取码稳定性（task-forward-sender）
+
+### 9. 转发邮件外层发件人被改写，击穿按发件人的类型过滤（commit 待填）
+- **问题**：用户反馈 Outlook 等邮箱「转发方式接码不稳、时灵时不灵」。根因：邮件被转发到 mail.com/其他收件箱后，那封转发邮件的外层 `from` 变成**转发者地址**（如你的 Outlook），不再是 OpenAI/Anthropic。而 `imap.js` 的类型过滤 `TYPE_FILTERS` 按发件人匹配，`fromMatch` 恒 false，只能靠主题硬撑；主题不含 verify/code 关键词就整封被跳过 → 漏码。另外时间窗只有 10 分钟（转发有延迟易落窗外）、mail.com 只扫最新 5 封（共用箱一刷屏就挤掉目标）。
+- **解决**：抽出纯函数 `messageMatchesType(type,{from,subject,body})`，发件人匹配同时在 `from + subject + body` 里找已知发件地址——转发正文通常保留原始 `From: xxx@openai.com`，转发/直收都命中。IMAP 路径改为「信封快速判断不中→解析正文重试」（懒解析省开销）。回溯窗 10→30 分钟(`FETCH_LOOKBACK_MINUTES`)、mail.com 扫描 5→15 封(`MAILCOM_SCAN_LIMIT`)，均可配。补 7 条单元测试（`test/imap-match.test.mjs`，含转发场景，无需 DB/Redis），`npm test` 先跑单测再跑集成。
+- **避免**：凡「转发/中转」链路，别假设外层信封头还是原始值——发件人、收件人都可能被改写或丢失，匹配要落到**正文里保留的原始头**。纯匹配逻辑抽成可单测函数，别埋在 IMAP 循环里（否则只能起真实邮箱才能验证）。

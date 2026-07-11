@@ -180,8 +180,10 @@ export async function fetchMailcomEmails(email, password) {
   const messages = parseMessageList(listHtml);
   if (messages.length === 0) return [];
 
+  // 共用收件箱转发时，一批邮件涌入会把目标挤出前几封，扫描条数放宽（可配 MAILCOM_SCAN_LIMIT）
+  const scanLimit = Number(process.env.MAILCOM_SCAN_LIMIT || 15);
   const results = [];
-  for (const msg of messages.slice(0, 5)) {
+  for (const msg of messages.slice(0, scanLimit)) {
     const detail = await readMessage(jar, msg.link);
     results.push(detail);
   }
