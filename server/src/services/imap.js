@@ -91,7 +91,7 @@ const TYPE_FILTERS = {
   },
 };
 
-function extractCode(text) {
+export function extractCode(text) {
   if (!text) return null;
   for (const pattern of CODE_PATTERNS) {
     const match = text.match(pattern);
