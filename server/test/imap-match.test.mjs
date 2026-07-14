@@ -1,5 +1,5 @@
-// 单元测试：messageMatchesType —— 类型匹配（含转发发件人被改写场景），无需 DB/Redis
-import { messageMatchesType } from '../src/services/imap.js';
+// 单元测试：messageMatchesType / pickCredential —— 类型匹配 + 凭证提取，无需 DB/Redis
+import { messageMatchesType, pickCredential } from '../src/services/imap.js';
 
 let pass = 0, fail = 0;
 function ok(cond, name) {
@@ -43,6 +43,35 @@ ok(messageMatchesType('all', { from: 'anyone@x.com', subject: '', body: '' }), '
 // 7. 仅靠主题关键词也能命中（发件人不认识但主题含 verification）
 ok(messageMatchesType('gpt', { from: 'unknown@x.com', subject: 'Your verification code', body: '123456' }),
   '主题含 verification 关键词命中 gpt');
+
+console.log('\n## pickCredential');
+
+const sendgridLink = 'https://u20216706.ct.sendgrid.net/ls/click?upn=u001.abc';
+
+// 1. 登录通知邮件（只有追踪链接、无数字码）→ gpt 应跳过（返回 null），不能把链接当码
+ok(pickCredential('gpt', { subject: 'FW: New sign-in to your OpenAI account', body: `点击 ${sendgridLink}` }) === null,
+  'gpt 跳过 New sign-in 登录通知（不返回追踪链接）');
+
+// 2. 真正的验证码邮件 → 返回 6 位数字码
+ok(pickCredential('gpt', { subject: 'FW: 你的临时 ChatGPT 登录代码', body: 'Your code is 419160' }) === '419160',
+  'gpt 从登录代码邮件提取数字码');
+
+// 3. gpt 邮件无数字码、只有普通链接 → 返回 null（数字码类型不拿链接兜底）
+ok(pickCredential('gpt', { subject: 'ChatGPT verify', body: `open ${sendgridLink}` }) === null,
+  'gpt 无数字码时不返回链接');
+
+// 4. claude 是 magic-link 类型 → 无数字码时返回链接
+const magic = 'https://claude.ai/magic-link#abc';
+ok(pickCredential('claude', { subject: 'Sign in to Claude', body: `link: ${magic}` }) === magic,
+  'claude 无数字码时返回 magic-link');
+
+// 5. 「登录代码」主题不能被误判为通知而跳过
+ok(pickCredential('gpt', { subject: '你的临时 ChatGPT 登录代码', body: '123456' }) === '123456',
+  '「登录代码」主题不被当作通知跳过');
+
+// 6. type=all 对通知邮件仍返回内容（原始调试视图）
+ok(pickCredential('all', { subject: 'New sign-in', body: `x ${sendgridLink}` }) === sendgridLink,
+  'type=all 通知邮件仍返回链接（不跳过）');
 
 console.log(`\n=== UNIT RESULT: ${pass} passed, ${fail} failed ===`);
 process.exit(fail ? 1 : 0);

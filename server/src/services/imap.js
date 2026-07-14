@@ -127,6 +127,32 @@ export function messageMatchesType(type, { from = '', subject = '', body = '' } 
   return fromMatch || subjectMatch;
 }
 
+// 登录/安全「通知」邮件——不含验证码，取码时必须跳过，
+// 否则会把通知正文里的追踪链接（如 sendgrid）误当成验证码返回。
+// 注意避开「登录代码/登录码」这类真正的验证码主题。
+const NOTIFICATION_SUBJECT = /new sign-?in to your|new sign-?in|new login to your|检测到.*登录|新的?登录活动|security alert|安全提醒|安全警报/i;
+
+// 这些类型的「码」本身就是链接（magic-link）；其余类型只认数字验证码，不拿链接兜底。
+const LINK_BASED_TYPES = new Set(['claude']);
+
+// 从一封邮件里挑出该 type 应返回的凭证。挑不出返回 null → 调用方跳过这封继续找下一封。
+// type='all' 为原始调试视图，返回码或链接（可能为空字符串，仍算命中）。
+export function pickCredential(type, { subject = '', body = '', links = null } = {}) {
+  const code = extractCode(body) || extractCode(subject);
+  if (type === 'all') {
+    const link = (links && links.length > 0) ? links[0] : extractLink(body);
+    return code || link || '';
+  }
+  // 通知类邮件且没有数字码 → 跳过（避免返回追踪链接）
+  if (NOTIFICATION_SUBJECT.test(subject) && !code) return null;
+  if (code) return code;
+  if (LINK_BASED_TYPES.has(type)) {
+    const link = (links && links.length > 0) ? links[0] : extractLink(body);
+    return link || null;
+  }
+  return null; // 数字码类型没提取到码 → 跳过，继续找真正的验证码邮件
+}
+
 const MAILCOM_DOMAINS = new Set([
   'mail.com', 'email.com', 'usa.com', 'consultant.com', 'europe.com',
   'asia.com', 'iname.com', 'writeme.com', 'dr.com', 'myself.com',
@@ -164,14 +190,10 @@ async function fetchViaWebApi(emailAddress, password, type, recipient) {
     if (!messageMatchesType(type, { from: email.from, subject: email.subject, body: email.body })) continue;
     if (!matchesRecipient(recipient, email.body, email.subject, email.from)) continue;
 
-    const code = extractCode(email.body) || extractCode(email.subject);
-    const link = (email.links && email.links.length > 0)
-      ? email.links[0]
-      : extractLink(email.body);
-
-    if (code || link || type === 'all') {
+    const cred = pickCredential(type, { subject: email.subject, body: email.body, links: email.links });
+    if (cred !== null) {
       return {
-        code: code || link || null,
+        code: cred || null,
         subject: email.subject,
         body: (email.body || '').substring(0, 2000),
         from: email.from,
@@ -257,12 +279,10 @@ async function fetchViaImap(emailAddress, password, type, recipient) {
 
         if (!matchesRecipient(recipient, bodyText, subject, fromAddr)) continue;
 
-        const code = extractCode(subject) || extractCode(bodyText);
-        const link = extractLink(bodyText);
-
-        if (code || link || type === 'all') {
+        const cred = pickCredential(type, { subject, body: bodyText });
+        if (cred !== null) {
           return {
-            code: code || link || null,
+            code: cred || null,
             subject,
             body: bodyText.substring(0, 2000),
             from: fromAddr,
