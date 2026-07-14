@@ -77,9 +77,10 @@
       </el-radio-group>
       <el-form label-position="top">
         <el-form-item v-if="codeForm.mode==='email'" label="邮箱账号">
-          <el-select v-model="codeForm.email" filterable allow-create default-first-option
-            placeholder="选择或输入账号邮箱" size="large" style="width:100%" @focus="ensureAccountsLoaded">
-            <el-option v-for="a in accountList" :key="a.id" :label="a.address" :value="a.address"></el-option>
+          <el-select v-model="codeForm.email" filterable remote allow-create default-first-option reserve-keyword
+            :remote-method="loadCodeAccounts" :loading="codeAccLoading"
+            placeholder="选择或输入账号邮箱（可搜索全部账号）" size="large" style="width:100%" @focus="() => loadCodeAccounts('')">
+            <el-option v-for="a in codeAccountOptions" :key="a.id" :label="a.address" :value="a.address"></el-option>
           </el-select>
         </el-form-item>
         <el-form-item v-else label="查询令牌">
@@ -631,6 +632,17 @@ createApp({
       if (r.code === 200) { accountList.value = r.data.list; accTotal.value = r.data.total; accountsLoaded = true; }
     }
     function ensureAccountsLoaded() { if (!accountsLoaded && isLoggedIn.value) loadAccounts(); }
+    // 在线接码的邮箱下拉：独立数据源 + 远程搜索，覆盖全部账号（后端按 keyword 分页），避免只显示账号管理当前页
+    const codeAccountOptions = ref([]), codeAccLoading = ref(false);
+    async function loadCodeAccounts(query) {
+      if (!isLoggedIn.value) return;
+      codeAccLoading.value = true;
+      try {
+        const q = `page=1&pageSize=50&keyword=${encodeURIComponent(query || '')}`;
+        const r = await api('GET', '/api/admin/email/list?' + q);
+        if (r.code === 200) codeAccountOptions.value = r.data.list;
+      } finally { codeAccLoading.value = false; }
+    }
     // 用户下拉(供「购买人」「分配」共用，来自 /api/admin/user/options)
     const userOptions = ref([]);
     async function loadUserOptions() { const r = await api('GET', '/api/admin/user/options'); if (r.code === 200) userOptions.value = r.data.list; }
@@ -851,6 +863,7 @@ createApp({
       loginForm, loginLoading, doLogin, logout,
       registerForm, registerLoading, doRegister,
       codeForm, codeTypes, codeLoading, codeResult, codeResultType, fetchCode, fetchFromRow, copyText, ensureAccountsLoaded,
+      codeAccountOptions, codeAccLoading, loadCodeAccounts,
       codexLoading, codexLoginAndFetch,
       stats,
       accountList, accTotal, accPage, accSearch, accSourceFilter, accHealthFilter, selectedAccounts, loadAccounts,
