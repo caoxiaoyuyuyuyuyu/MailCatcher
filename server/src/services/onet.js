@@ -62,7 +62,11 @@ export async function loginOnet(email, password, { session = null } = {}) {
     if (!hasOnetInbox(text)) throw new WebmailError('onet', 'structure');
     return { page, session: ownedSession };
   } catch (err) {
-    if (err instanceof WebmailError) throw err;
+    if (err instanceof WebmailError) {
+      if (!session) await ownedSession.close();
+      throw err;
+    }
+    if (!session) await ownedSession.close();
     throw new WebmailError('onet', 'network', err?.message || '请求失败');
   }
 }

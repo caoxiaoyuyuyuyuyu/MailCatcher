@@ -175,11 +175,11 @@ export function getWebmailProvider(emailAddress) {
 }
 
 export async function fetchVerificationCode(emailAddress, password, type, recipient) {
+  const provider = getWebmailProvider(emailAddress);
+  if (provider) return fetchViaWebmail(provider, emailAddress, password, type, recipient);
   if (await isMailcomDomain(emailAddress)) {
     return fetchViaWebApi(emailAddress, password, type, recipient);
   }
-  const provider = getWebmailProvider(emailAddress);
-  if (provider) return fetchViaWebmail(provider, emailAddress, password, type, recipient);
   return fetchViaImap(emailAddress, password, type, recipient);
 }
 

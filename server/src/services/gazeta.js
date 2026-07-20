@@ -58,7 +58,11 @@ export async function loginGazeta(email, password, { session = null, fake = null
     }
     return { page, session: ownedSession };
   } catch (err) {
-    if (err instanceof WebmailError) throw err;
+    if (err instanceof WebmailError) {
+      if (!session) await ownedSession.close();
+      throw err;
+    }
+    if (!session) await ownedSession.close();
     throw new WebmailError('gazeta', 'network', err?.message || '请求失败');
   }
 }

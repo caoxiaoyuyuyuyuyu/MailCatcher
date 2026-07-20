@@ -152,7 +152,10 @@ export async function clickFirstVisible(page, selectors) {
 }
 
 export async function collectRecentMessages(page, { baseUrl = page.url(), limit = Number(process.env.WEBMAIL_SCAN_LIMIT || 15) } = {}) {
-  const rows = parseMessageRows(await page.content(), baseUrl).slice(0, limit);
+  const origin = (() => { try { return new URL(baseUrl).origin; } catch { return ''; } })();
+  const rows = parseMessageRows(await page.content(), baseUrl)
+    .filter(row => !row.href || !origin || (() => { try { return new URL(row.href).origin === origin; } catch { return false; } })())
+    .slice(0, limit);
   const needsDetail = rows.filter(row => !row.body && row.href);
   if (!needsDetail.length) return rows.map(({ href, ...row }) => row);
 

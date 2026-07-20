@@ -104,6 +104,8 @@ MailCatcher 已从「纯接码工具」演进为「**多租户账号管理 + 统
 - `cli/mailcatcher` — CLI 工具（全局 `/usr/local/bin/mailcatcher`）
 - `server/src/services/imap.js` — IMAP 连接和验证码提取核心（self 账号）
 - `server/src/services/mailcom.js` — mail.com Web API 抓取（self 账号）
+- `server/src/services/webmailBrowser.js` — Chromium 会话、通用网页邮箱 HTML/链接解析与安全错误
+- `server/src/services/gazeta.js` / `server/src/services/onet.js` — Gazeta/Onet 网页登录与收件箱适配器
 - `server/src/services/forward171.js` — 171mail 转发适配器（forward 账号）
 - `server/src/services/crypto.js` — AES-256-GCM 加解密 + token hash（方案乙）
 - `server/src/middleware/auth.js` — JWT + requireRole(admin/member) + resolvePrincipal + resolveAppKey + resolveIdentity
@@ -141,9 +143,10 @@ mailcatcher log list / clear            # 日志管理
 - **App Key 外部接入**：管理员在「App Key」页创建凭证；外部系统用 `Authorization: Bearer ak_xxx:sk_xxx` 调接码 API（`/api/v1/message?email=xxx&type=gpt`）。可配账号范围（全部/指定 ID），支持启用/禁用/轮换
 - **环境变量**：生产必须设置 `ENCRYPTION_KEY`（加密 IMAP 密码/171mail token）与 `JWT_SECRET`；缺省会告警
 - **账号来源**：`source=self` 走本地 IMAP/mailcom；`source=forward` 转发到 171mail（密文存上游 token）
+- **Gazeta/Onet self**：`@gazeta.pl` 和 `@onet.pl` 走 Chromium 网页邮箱；Onet 必须先在官方页面完成免费套餐/服务启用，系统检测到套餐页时返回 activation 错误，不自动同意授权或付费；验证码挑战/二步验证返回 challenge 错误
 - **方案乙**：所有账号对外都用我方签发的 token（库内存 hash，创建/轮换时明文仅显示一次）
 - **默认管理员**：admin / admin123，角色 `admin`（旧库 super_admin/team_admin 启动时自动迁移为 admin）
 - **自助注册**：`POST /api/admin/register`（公开），邮箱须 `@apexin.ai` 后缀 + 密码二次确认（≥6 位）；注册即 `member`，登录后由管理员在用户管理升级为 admin。邮箱登录大小写不敏感
 - **前端导航按角色显隐**：member 只见「在线接码 + 账号管理」（登录落地账号管理）；admin 另见控制台/用户管理/App Key/服务配置/查询日志/个人。账号页：任何人都能加账号/导入/删自己的；每行按 `can_manage` 显示编辑/状态/分配/删除按钮；「分配」弹窗按 `/api/admin/user/options` 选用户，调 `grant`/`revoke`
 - **Codex 登录触发**：`POST /api/v1/codex/send`（需登录）用无头浏览器在 chatgpt.com 提交邮箱 → OpenAI 给该邮箱发「临时登录代码」（纯邮箱 OTP、无需密码、实测未遇验证码拦截）；再配合 self+`fetch_address` 转发收件箱把码取回。前端「在线接码」邮箱模式有「发送 Codex 登录码并自动取码」一键按钮。⚠ 依赖 OpenAI 登录页结构，可能随其改版/加强风控而失效
-- **可配置**：`MAILCATCHER_DATA_DIR`（DB 目录）、`FORWARD_171_BASE`（171mail 地址，测试用）、`REGISTER_EMAIL_SUFFIX`（注册邮箱后缀，默认 `@apexin.ai`）、`DB_BACKEND`（`sqlite` 或 `postgres`）、`DATABASE_URL`（PostgreSQL 连接串）、`REDIS_URL`（Redis 地址，默认 `redis://127.0.0.1:6379`）、`FETCH_CONCURRENCY`（Worker 并发数，默认 20）、`FETCH_LOOKBACK_MINUTES`（取码回溯时间窗，默认 30）、`MAILCOM_SCAN_LIMIT`（mail.com 每次扫描邮件数，默认 15）
+- **可配置**：`MAILCATCHER_DATA_DIR`（DB 目录）、`FORWARD_171_BASE`（171mail 地址，测试用）、`REGISTER_EMAIL_SUFFIX`（注册邮箱后缀，默认 `@apexin.ai`）、`DB_BACKEND`（`sqlite` 或 `postgres`）、`DATABASE_URL`（PostgreSQL 连接串）、`REDIS_URL`（Redis 地址，默认 `redis://127.0.0.1:6379`）、`FETCH_CONCURRENCY`（Worker 并发数，默认 20）、`FETCH_LOOKBACK_MINUTES`（取码回溯时间窗，默认 30）、`MAILCOM_SCAN_LIMIT`（mail.com 每次扫描邮件数，默认 15）、`CHROME_PATH`（网页邮箱 Chromium 路径，默认 `/usr/bin/google-chrome`）、`WEBMAIL_SCAN_LIMIT`（Gazeta/Onet 每次扫描邮件数，默认 15）

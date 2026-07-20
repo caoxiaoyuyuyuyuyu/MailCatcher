@@ -5,7 +5,7 @@
 
 ## 功能
 
-- **统一接码** — 一个入口 `/api/v1/message`，按账号来源自动分发（本地 IMAP / mail.com / 171mail 转发）
+- **统一接码** — 一个入口 `/api/v1/message`，按账号来源自动分发（本地 IMAP / mail.com / Gazeta·Onet 网页邮箱 / 171mail 转发）
 - **角色与归属** — 单服务一个团队，两级角色（admin / member）；账号按归属隔离，谁添加谁拥有，可分配给他人共用
 - **自助注册** — 用 `@apexin.ai` 邮箱注册（密码二次确认），注册后即可登录，管理员再升级为 admin
 - **账号来源（source）** — `self`（自管邮箱，本地取码）/ `forward`（171mail 账号，API 转发取码）
@@ -43,12 +43,14 @@ ENCRYPTION_KEY=请设置随机密钥 JWT_SECRET=请设置随机密钥 npm start
 
 | source | 说明 | token | 接码路径 |
 |--------|------|-------|----------|
-| `self` | 自管邮箱（密码加密存） | 系统自动签发 | 本地 IMAP / mail.com Web API |
+| `self` | 自管邮箱（密码加密存） | 系统自动签发 | 本地 IMAP / mail.com Web API / Gazeta·Onet Webmail |
 | `forward` | 171mail 账号（上游 token 加密存） | 系统自动签发 | 转发到 `b.171mail.com/api/v1/message` |
 
 > **展示邮箱 ≠ 收件邮箱**：`self` 账号可设「收件邮箱」`fetch_address`。用于 Codex 这类——用 Outlook 邮箱订阅（展示用 Outlook），验证码转发到公司 mail.com（实际从 mail.com 取码）。多个 Outlook 共用一个 mail.com 收件箱时，按转发邮件里保留的原始 `To:` 自动区分。「收件密码」填收件邮箱的密码。
 >
 > **转发取码更稳**：转发会把邮件外层发件人改写成转发者地址，令按发件人的类型过滤（gpt/claude…）失效——现在同时从**正文里的原始 `From:`** 匹配发件人，转发/直收都能命中。取码回溯窗默认 30 分钟（`FETCH_LOOKBACK_MINUTES` 可调），mail.com 每次扫描 15 封（`MAILCOM_SCAN_LIMIT` 可调），避免转发延迟或共用箱刷屏导致漏码。
+
+> **Gazeta/Onet 网页邮箱**：`@gazeta.pl` 与 `@onet.pl` 使用受控 Chromium 网页登录并读取最近邮件，不需要新增账号来源类型。Onet 若跳到「Wybierz plan」套餐页，必须由账号持有人先在官方页面完成免费的邮箱服务启用；系统不会自动同意营销授权、选择套餐或付费。验证码挑战/二步验证会返回“需要额外验证，暂不支持自动取码”。网页登录使用 `CHROME_PATH`（默认 `/usr/bin/google-chrome`）与 `WEBMAIL_SCAN_LIMIT`（默认 15）配置。首次启用后可用真实账号做只读冒烟测试，但真实密码、Cookie 和邮件正文不得进入日志或测试 fixture。
 
 > 不论哪种来源，对外都用 **MailCatcher 自己签发的查询令牌**（库内存 hash）；171mail 的上游 token 仅作内部加密凭证。
 
@@ -174,7 +176,7 @@ server/public/index.html        # 完整前端 UI
 
 ## 注意事项
 
-- **环境变量**: 生产必须设置 `ENCRYPTION_KEY`、`JWT_SECRET`；可选 `MAILCATCHER_DATA_DIR`、`FORWARD_171_BASE`
+- **环境变量**: 生产必须设置 `ENCRYPTION_KEY`、`JWT_SECRET`；可选 `MAILCATCHER_DATA_DIR`、`FORWARD_171_BASE`、`CHROME_PATH`、`WEBMAIL_SCAN_LIMIT`
 - **令牌一次性**: 查询令牌 / API Key 创建或轮换时明文仅显示一次，库内只存 hash
 - **应用专用密码**: Gmail/Outlook 等 self 账号需使用应用专用密码
 - **10 分钟窗口**: 本地 IMAP 只查询最近 10 分钟邮件
