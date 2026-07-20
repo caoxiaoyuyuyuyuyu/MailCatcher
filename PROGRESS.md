@@ -9,6 +9,11 @@
 - **解决**：把 Onet 适配器改为 Chromium 网页登录，识别 `Wybierz plan`/`Poczta Basic` 等 activation 页面并返回稳定错误；不自动选择套餐、同意授权或支付。Gazeta/Onet 的解析与路由使用本地 fixture 测试，真实账号只做部署后只读冒烟。
 - **避免**：第三方网页登录要分别验证“凭据认证”“服务激活”“收件箱可读”三个状态，不能把 HTTP 200 或 O!Konto 登录成功当成邮箱可用。
 
+### 11. Onet 官方 IMAP 比网页自动化更稳定（commit c0dbe68）
+- **问题**：Onet 手动浏览器能进入收件箱，但无头 Chromium 登录会触发 Google reCAPTCHA，无法自动取码。
+- **解决**：验证 `imap.poczta.onet.pl:993`（SSL）可用后，将 Onet 默认路由切到 IMAP；网页适配器保留为 `ONET_ACCESS_MODE=webmail` 的显式回退。真实账号通过 token 查询已成功连到收件箱并返回“无新邮件”。
+- **避免**：对同一邮箱同时验证 Webmail、IMAP、转发三种通道；优先使用官方稳定协议，网页自动化只作为确有需要时的回退。
+
 ## 账号管理系统改造（task-account-mgmt）
 
 ### 1. 两类 token 的存储方式必须区分（commit a0fbaef）
