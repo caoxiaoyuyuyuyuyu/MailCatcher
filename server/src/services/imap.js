@@ -4,6 +4,32 @@ import db from '../db.js';
 
 const mxCache = new Map();
 
+const KNOWN_SERVERS = {
+  'gmail.com': { host: 'imap.gmail.com', port: 993, secure: true },
+  'googlemail.com': { host: 'imap.gmail.com', port: 993, secure: true },
+  'outlook.com': { host: 'outlook.office365.com', port: 993, secure: true },
+  'hotmail.com': { host: 'outlook.office365.com', port: 993, secure: true },
+  'live.com': { host: 'outlook.office365.com', port: 993, secure: true },
+  'yahoo.com': { host: 'imap.mail.yahoo.com', port: 993, secure: true },
+  'icloud.com': { host: 'imap.mail.me.com', port: 993, secure: true },
+  'mail.com': { host: 'imap.mail.com', port: 993, secure: true },
+  'qq.com': { host: 'imap.qq.com', port: 993, secure: true },
+  '163.com': { host: 'imap.163.com', port: 993, secure: true },
+  '126.com': { host: 'imap.126.com', port: 993, secure: true },
+  'sina.com': { host: 'imap.sina.com', port: 993, secure: true },
+  'yeah.net': { host: 'imap.yeah.net', port: 993, secure: true },
+  'zoho.com': { host: 'imap.zoho.com', port: 993, secure: true },
+  'protonmail.com': { host: 'imap.protonmail.ch', port: 993, secure: true },
+  'aol.com': { host: 'imap.aol.com', port: 993, secure: true },
+  'gmx.com': { host: 'imap.gmx.com', port: 993, secure: true },
+  'yandex.com': { host: 'imap.yandex.com', port: 993, secure: true },
+  'onet.pl': { host: 'imap.poczta.onet.pl', port: 993, secure: true },
+};
+
+export function getKnownServer(domain) {
+  return KNOWN_SERVERS[String(domain || '').toLowerCase()] || null;
+}
+
 async function isMxMailcom(domain) {
   if (mxCache.has(domain)) return mxCache.get(domain);
   try {
@@ -26,28 +52,7 @@ async function getServerConfig(emailAddress) {
     return { host: server.host, port: server.port, secure: !!server.use_ssl };
   }
 
-  const KNOWN_SERVERS = {
-    'gmail.com': { host: 'imap.gmail.com', port: 993, secure: true },
-    'googlemail.com': { host: 'imap.gmail.com', port: 993, secure: true },
-    'outlook.com': { host: 'outlook.office365.com', port: 993, secure: true },
-    'hotmail.com': { host: 'outlook.office365.com', port: 993, secure: true },
-    'live.com': { host: 'outlook.office365.com', port: 993, secure: true },
-    'yahoo.com': { host: 'imap.mail.yahoo.com', port: 993, secure: true },
-    'icloud.com': { host: 'imap.mail.me.com', port: 993, secure: true },
-    'mail.com': { host: 'imap.mail.com', port: 993, secure: true },
-    'qq.com': { host: 'imap.qq.com', port: 993, secure: true },
-    '163.com': { host: 'imap.163.com', port: 993, secure: true },
-    '126.com': { host: 'imap.126.com', port: 993, secure: true },
-    'sina.com': { host: 'imap.sina.com', port: 993, secure: true },
-    'yeah.net': { host: 'imap.yeah.net', port: 993, secure: true },
-    'zoho.com': { host: 'imap.zoho.com', port: 993, secure: true },
-    'protonmail.com': { host: 'imap.protonmail.ch', port: 993, secure: true },
-    'aol.com': { host: 'imap.aol.com', port: 993, secure: true },
-    'gmx.com': { host: 'imap.gmx.com', port: 993, secure: true },
-    'yandex.com': { host: 'imap.yandex.com', port: 993, secure: true },
-  };
-
-  if (KNOWN_SERVERS[domain]) return KNOWN_SERVERS[domain];
+  if (getKnownServer(domain)) return getKnownServer(domain);
 
   return { host: `imap.${domain}`, port: 993, secure: true };
 }
@@ -174,9 +179,18 @@ export function getWebmailProvider(emailAddress) {
   return null;
 }
 
+export function getMailboxAccessMode(emailAddress) {
+  const provider = getWebmailProvider(emailAddress);
+  if (provider === 'onet') return process.env.ONET_ACCESS_MODE === 'webmail' ? 'webmail' : 'imap';
+  if (provider === 'gazeta') return 'webmail';
+  return 'imap';
+}
+
 export async function fetchVerificationCode(emailAddress, password, type, recipient) {
   const provider = getWebmailProvider(emailAddress);
-  if (provider) return fetchViaWebmail(provider, emailAddress, password, type, recipient);
+  if (provider && getMailboxAccessMode(emailAddress) === 'webmail') {
+    return fetchViaWebmail(provider, emailAddress, password, type, recipient);
+  }
   if (await isMailcomDomain(emailAddress)) {
     return fetchViaWebApi(emailAddress, password, type, recipient);
   }

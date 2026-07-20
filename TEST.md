@@ -26,10 +26,12 @@ ENCRYPTION_KEY=your-secret JWT_SECRET=your-jwt npm start   # http://localhost:30
 
 ### Gazeta/Onet 真实账号只读冒烟
 
-`@gazeta.pl` 与 `@onet.pl` 的 `self` 账号通过 Chromium 网页邮箱取码。需要运行环境有 Chrome（或设置
-`CHROME_PATH`），可用 `WEBMAIL_SCAN_LIMIT` 调整最近邮件扫描数量，默认 15。Onet 账号若停在
-“Wybierz plan”套餐页，先由账号持有人在官方页面完成免费的邮箱服务启用；自动化不会替你同意营销授权、
-选择套餐或付费。验证码挑战/二步验证会返回稳定的“需要额外验证，暂不支持自动取码”错误。
+`@gazeta.pl` 的 `self` 账号通过 Chromium 网页邮箱取码；`@onet.pl` 默认通过官方 IMAP
+`imap.poczta.onet.pl:993`（SSL）取码，不依赖网页 reCAPTCHA。需要网页模式时设置
+`ONET_ACCESS_MODE=webmail`，并保证运行环境有 Chrome（或设置 `CHROME_PATH`）；可用
+`WEBMAIL_SCAN_LIMIT` 调整扫描数量，默认 15。Onet 账号若停在 “Wybierz plan” 套餐页，先由账号持有人
+完成免费的邮箱服务启用；自动化不会替你同意营销授权、选择套餐或付费。验证码挑战/二步验证会返回稳定的
+“需要额外验证，暂不支持自动取码”错误。
 
 真实冒烟只在本地手动执行：运行时输入账号密码，确认返回邮件或 `activation`/`challenge`/`credentials`
 错误即可；不要把密码、Cookie、完整响应或真实验证码保存到仓库。真实账号不可作为 `npm test` 的依赖。
