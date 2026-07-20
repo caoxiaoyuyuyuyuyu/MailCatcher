@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { extractLinksAndText, parseMessageRows, WebmailError } from '../src/services/webmailBrowser.js';
+import { extractLinksAndText, parseMessageRows, WebmailError, firstVisibleLocator } from '../src/services/webmailBrowser.js';
 
 test('extractLinksAndText removes scripts and keeps links', () => {
   const out = extractLinksAndText('<style>x</style><p>Code 123456</p><script>secret</script><a href="/m/1">open</a>');
@@ -27,4 +27,18 @@ test('WebmailError exposes stable kind without sensitive input', () => {
   assert.equal(err.kind, 'credentials');
   assert.equal(err.message, 'Onet 登录失败：邮箱或密码错误');
   assert.equal(err.message.includes('password'), false);
+});
+
+test('firstVisibleLocator waits for a delayed login control', async () => {
+  let visibilityChecks = 0;
+  const locator = {
+    async count() { return 1; },
+    async isVisible() { visibilityChecks += 1; return visibilityChecks >= 3; },
+  };
+  const page = {
+    locator() { return { first() { return locator; } }; },
+    async waitForTimeout() {},
+  };
+  assert.equal(await firstVisibleLocator(page, ['input[type="password"]'], { timeout: 50, pollMs: 0 }), locator);
+  assert.equal(visibilityChecks, 3);
 });

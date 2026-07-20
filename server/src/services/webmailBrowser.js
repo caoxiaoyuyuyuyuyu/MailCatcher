@@ -129,23 +129,28 @@ export async function pageText(page) {
   return page.locator('body').innerText().catch(async () => stripHtml(await page.content().catch(() => '')));
 }
 
-export async function firstVisibleLocator(page, selectors) {
-  for (const selector of selectors) {
-    const locator = page.locator(selector).first();
-    if (await locator.count().catch(() => 0) && await locator.isVisible().catch(() => false)) return locator;
-  }
+export async function firstVisibleLocator(page, selectors, { timeout = 0, pollMs = 100 } = {}) {
+  const deadline = Date.now() + Math.max(0, timeout);
+  do {
+    for (const selector of selectors) {
+      const locator = page.locator(selector).first();
+      if (await locator.count().catch(() => 0) && await locator.isVisible().catch(() => false)) return locator;
+    }
+    if (!timeout || Date.now() >= deadline) break;
+    await page.waitForTimeout(Math.min(pollMs, Math.max(0, deadline - Date.now()))).catch(() => {});
+  } while (Date.now() <= deadline);
   return null;
 }
 
-export async function fillFirstVisible(page, selectors, value) {
-  const locator = await firstVisibleLocator(page, selectors);
+export async function fillFirstVisible(page, selectors, value, options = {}) {
+  const locator = await firstVisibleLocator(page, selectors, options);
   if (!locator) return false;
   await locator.fill(value);
   return true;
 }
 
-export async function clickFirstVisible(page, selectors) {
-  const locator = await firstVisibleLocator(page, selectors);
+export async function clickFirstVisible(page, selectors, options = {}) {
+  const locator = await firstVisibleLocator(page, selectors, options);
   if (!locator) return false;
   await locator.click();
   return true;

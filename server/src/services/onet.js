@@ -38,10 +38,9 @@ export async function loginOnet(email, password, { session = null } = {}) {
       'button:has-text("Next")', 'button:has-text("Dalej")', 'button:has-text("Continue")', 'button[type="submit"]',
     ])) throw new WebmailError('onet', 'structure');
 
-    await page.waitForTimeout(500);
     if (!await fillFirstVisible(page, [
       'input[type="password"]', 'input[name="password"]', 'input[autocomplete="current-password"]',
-    ], password)) throw new WebmailError('onet', 'structure');
+    ], password, { timeout: 15000 })) throw new WebmailError('onet', 'structure');
     if (!await clickFirstVisible(page, [
       'button:has-text("Sign in")', 'button:has-text("Zaloguj")', 'button:has-text("Log in")', 'button[type="submit"]',
     ])) throw new WebmailError('onet', 'structure');
