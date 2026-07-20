@@ -1,5 +1,5 @@
 // 单元测试：messageMatchesType / pickCredential —— 类型匹配 + 凭证提取，无需 DB/Redis
-import { messageMatchesType, pickCredential } from '../src/services/imap.js';
+import { messageMatchesType, pickCredential, getMailboxSearchOrder, getMailboxSearchPaths } from '../src/services/imap.js';
 
 let pass = 0, fail = 0;
 function ok(cond, name) {
@@ -45,6 +45,26 @@ ok(messageMatchesType('gpt', { from: 'unknown@x.com', subject: 'Your verificatio
   '主题含 verification 关键词命中 gpt');
 
 console.log('\n## pickCredential');
+
+console.log('\n## mailbox search order');
+
+const onetFolders = [
+  { path: 'Sent' },
+  { path: 'INBOX' },
+  { path: 'Społeczności' },
+  { path: 'Junk' },
+  { path: 'Powiadomienia' },
+  { path: 'Trash' },
+  { path: 'Archive' },
+];
+ok(JSON.stringify(getMailboxSearchOrder(onetFolders)) === JSON.stringify([
+  'INBOX', 'Społeczności', 'Junk', 'Powiadomienia', 'Archive',
+]), '优先扫描收件箱和 Onet 分类文件夹，跳过已发送/草稿/回收站');
+ok(JSON.stringify(getMailboxSearchPaths('jhonlelojo@onet.pl', onetFolders)) === JSON.stringify([
+  'INBOX', 'Społeczności', 'Junk', 'Powiadomienia', 'Archive',
+]), '仅 Onet 账号扫描分类文件夹');
+ok(JSON.stringify(getMailboxSearchPaths('user@gmail.com', onetFolders)) === JSON.stringify(['INBOX']),
+  '非 Onet 账号仍只扫描 INBOX');
 
 const sendgridLink = 'https://u20216706.ct.sendgrid.net/ls/click?upn=u001.abc';
 

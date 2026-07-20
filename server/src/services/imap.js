@@ -140,6 +140,48 @@ const NOTIFICATION_SUBJECT = /new sign-?in to your|new sign-?in|new login to you
 // 这些类型的「码」本身就是链接（magic-link）；其余类型只认数字验证码，不拿链接兜底。
 const LINK_BASED_TYPES = new Set(['claude']);
 
+const SKIP_MAILBOX_RE = /^(?:sent|drafts?|trash|outbox|wysłane|szkice|kosz)$/i;
+const MAILBOX_PRIORITY = [
+  /^inbox$/i,
+  /^społeczności$/i,
+  /^(?:junk|spam)$/i,
+  /^powiadomienia$/i,
+];
+
+function mailboxPath(mailbox) {
+  return typeof mailbox === 'string' ? mailbox : mailbox?.path;
+}
+
+// 邮箱服务商可能把登录邮件自动放入分类文件夹；优先扫描收件箱和常见收件分类，
+// 同时保留其他非发件箱文件夹作为兜底。发件箱、草稿和回收站不参与取码。
+export function getMailboxSearchOrder(mailboxes = []) {
+  const paths = [];
+  const seen = new Set();
+
+  for (const mailbox of mailboxes) {
+    const path = mailboxPath(mailbox);
+    const key = String(path || '').toLowerCase();
+    if (!path || seen.has(key) || SKIP_MAILBOX_RE.test(path)) continue;
+    seen.add(key);
+    paths.push(path);
+  }
+
+  return paths
+    .map((path, index) => ({ path, index, priority: MAILBOX_PRIORITY.findIndex(re => re.test(path)) }))
+    .sort((a, b) => {
+      const priorityA = a.priority === -1 ? MAILBOX_PRIORITY.length : a.priority;
+      const priorityB = b.priority === -1 ? MAILBOX_PRIORITY.length : b.priority;
+      return priorityA - priorityB || a.index - b.index;
+    })
+    .map(item => item.path);
+}
+
+export function getMailboxSearchPaths(emailAddress, mailboxes = []) {
+  if (getWebmailProvider(emailAddress) !== 'onet') return ['INBOX'];
+  const paths = getMailboxSearchOrder(mailboxes);
+  return paths.length > 0 ? paths : ['INBOX'];
+}
+
 // 从一封邮件里挑出该 type 应返回的凭证。挑不出返回 null → 调用方跳过这封继续找下一封。
 // type='all' 为原始调试视图，返回码或链接（可能为空字符串，仍算命中）。
 export function pickCredential(type, { subject = '', body = '', links = null } = {}) {
@@ -278,72 +320,90 @@ async function fetchViaImap(emailAddress, password, type, recipient) {
   }
 
   try {
-    const lock = await client.getMailboxLock('INBOX');
-
-    try {
-      const lookbackSince = new Date(Date.now() - LOOKBACK_MINUTES * 60 * 1000);
-      const filter = { since: lookbackSince };
-
-      const messages = [];
-      for await (const msg of client.fetch(filter, {
-        envelope: true,
-        source: true,
-        uid: true,
-      })) {
-        messages.push(msg);
+    let mailboxPaths = ['INBOX'];
+    if (getWebmailProvider(emailAddress) === 'onet') {
+      try {
+        mailboxPaths = getMailboxSearchPaths(emailAddress, await client.list());
+      } catch {
+        // 某些 IMAP 服务不支持 LIST；Onet 回退到 INBOX。
       }
-
-      messages.sort((a, b) => {
-        const dateA = a.envelope?.date ? new Date(a.envelope.date) : new Date(0);
-        const dateB = b.envelope?.date ? new Date(b.envelope.date) : new Date(0);
-        return dateB - dateA;
-      });
-
-      for (const msg of messages) {
-        const fromAddr = msg.envelope?.from?.[0]?.address?.toLowerCase() || '';
-        const subject = msg.envelope?.subject || '';
-        const date = msg.envelope?.date;
-
-        if (date && new Date(date) < lookbackSince) continue;
-
-        let bodyText = '';
-        let bodyParsed = false;
-        const parseBody = async () => {
-          if (bodyParsed) return;
-          bodyParsed = true;
-          if (msg.source) {
-            const { simpleParser } = await import('mailparser');
-            const parsed = await simpleParser(msg.source);
-            bodyText = parsed.text || parsed.html || '';
-          }
-        };
-
-        // 先用信封 from + 主题快速判断；不中再解析正文重试
-        // （转发邮件原始发件人在正文里，需要正文才能命中）
-        if (!messageMatchesType(type, { from: fromAddr, subject })) {
-          await parseBody();
-          if (!messageMatchesType(type, { from: fromAddr, subject, body: bodyText })) continue;
-        }
-        await parseBody();
-
-        if (!matchesRecipient(recipient, bodyText, subject, fromAddr)) continue;
-
-        const cred = pickCredential(type, { subject, body: bodyText });
-        if (cred !== null) {
-          return {
-            code: cred || null,
-            subject,
-            body: bodyText.substring(0, 2000),
-            from: fromAddr,
-            date: date?.toISOString(),
-          };
-        }
-      }
-
-      return null;
-    } finally {
-      lock.release();
     }
+    if (mailboxPaths.length === 0) mailboxPaths = ['INBOX'];
+
+    const lookbackSince = new Date(Date.now() - LOOKBACK_MINUTES * 60 * 1000);
+    const filter = { since: lookbackSince };
+
+    for (const mailboxPath of mailboxPaths) {
+      let lock;
+      try {
+        lock = await client.getMailboxLock(mailboxPath);
+      } catch (err) {
+        if (mailboxPath === 'INBOX') throw err;
+        continue;
+      }
+
+      try {
+        const messages = [];
+        for await (const msg of client.fetch(filter, {
+          envelope: true,
+          source: true,
+          uid: true,
+        })) {
+          messages.push(msg);
+        }
+
+        messages.sort((a, b) => {
+          const dateA = a.envelope?.date ? new Date(a.envelope.date) : new Date(0);
+          const dateB = b.envelope?.date ? new Date(b.envelope.date) : new Date(0);
+          return dateB - dateA;
+        });
+
+        for (const msg of messages) {
+          const fromAddr = msg.envelope?.from?.[0]?.address?.toLowerCase() || '';
+          const subject = msg.envelope?.subject || '';
+          const date = msg.envelope?.date;
+
+          if (date && new Date(date) < lookbackSince) continue;
+
+          let bodyText = '';
+          let bodyParsed = false;
+          const parseBody = async () => {
+            if (bodyParsed) return;
+            bodyParsed = true;
+            if (msg.source) {
+              const { simpleParser } = await import('mailparser');
+              const parsed = await simpleParser(msg.source);
+              bodyText = parsed.text || parsed.html || '';
+            }
+          };
+
+          // 先用信封 from + 主题快速判断；不中再解析正文重试
+          // （转发邮件原始发件人在正文里，需要正文才能命中）
+          if (!messageMatchesType(type, { from: fromAddr, subject })) {
+            await parseBody();
+            if (!messageMatchesType(type, { from: fromAddr, subject, body: bodyText })) continue;
+          }
+          await parseBody();
+
+          if (!matchesRecipient(recipient, bodyText, subject, fromAddr)) continue;
+
+          const cred = pickCredential(type, { subject, body: bodyText });
+          if (cred !== null) {
+            return {
+              code: cred || null,
+              subject,
+              body: bodyText.substring(0, 2000),
+              from: fromAddr,
+              date: date?.toISOString(),
+            };
+          }
+        }
+      } finally {
+        lock.release();
+      }
+    }
+
+    return null;
   } finally {
     await client.logout().catch(() => {});
   }
