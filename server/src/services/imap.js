@@ -167,10 +167,19 @@ async function isMailcomDomain(emailAddress) {
   return isMxMailcom(domain);
 }
 
+export function getWebmailProvider(emailAddress) {
+  const domain = emailAddress.split('@')[1]?.toLowerCase();
+  if (domain === 'gazeta.pl') return 'gazeta';
+  if (domain === 'onet.pl') return 'onet';
+  return null;
+}
+
 export async function fetchVerificationCode(emailAddress, password, type, recipient) {
   if (await isMailcomDomain(emailAddress)) {
     return fetchViaWebApi(emailAddress, password, type, recipient);
   }
+  const provider = getWebmailProvider(emailAddress);
+  if (provider) return fetchViaWebmail(provider, emailAddress, password, type, recipient);
   return fetchViaImap(emailAddress, password, type, recipient);
 }
 
@@ -202,6 +211,32 @@ async function fetchViaWebApi(emailAddress, password, type, recipient) {
     }
   }
 
+  return null;
+}
+
+async function fetchViaWebmail(provider, emailAddress, password, type, recipient) {
+  const module = provider === 'gazeta'
+    ? await import('./gazeta.js')
+    : await import('./onet.js');
+  const emails = provider === 'gazeta'
+    ? await module.fetchGazetaEmails(emailAddress, password)
+    : await module.fetchOnetEmails(emailAddress, password);
+
+  if (!emails || emails.length === 0) return null;
+  for (const email of emails) {
+    if (!messageMatchesType(type, { from: email.from, subject: email.subject, body: email.body })) continue;
+    if (!matchesRecipient(recipient, email.body, email.subject, email.from)) continue;
+    const cred = pickCredential(type, { subject: email.subject, body: email.body, links: email.links });
+    if (cred !== null) {
+      return {
+        code: cred || null,
+        subject: email.subject,
+        body: (email.body || '').substring(0, 2000),
+        from: email.from,
+        date: email.date,
+      };
+    }
+  }
   return null;
 }
 
