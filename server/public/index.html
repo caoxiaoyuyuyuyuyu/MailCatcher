@@ -71,6 +71,14 @@
     <!-- 在线接码 -->
     <div v-if="page==='code'" class="page-card" style="max-width:640px;margin:0 auto">
       <div class="page-title">在线接码</div>
+      <el-alert
+        title="多人共用账号请勿同时登录取码"
+        description="同一账号同一时间仅限一人操作。请等待上一位完成登录后再发起，否则可能取到他人的最新验证码，导致登录失败。"
+        type="warning"
+        :closable="false"
+        show-icon
+        style="margin-bottom:18px">
+      </el-alert>
       <el-radio-group v-model="codeForm.mode" style="margin-bottom:16px">
         <el-radio-button value="email" :disabled="!isLoggedIn">按邮箱（需登录）</el-radio-button>
         <el-radio-button value="token">按令牌</el-radio-button>
@@ -79,7 +87,8 @@
         <el-form-item v-if="codeForm.mode==='email'" label="邮箱账号">
           <el-select v-model="codeForm.email" filterable remote allow-create default-first-option reserve-keyword
             :remote-method="loadCodeAccounts" :loading="codeAccLoading"
-            placeholder="选择或输入账号邮箱（可搜索全部账号）" size="large" style="width:100%" @focus="() => loadCodeAccounts('')">
+            placeholder="选择或输入账号邮箱（可搜索全部账号）" size="large" style="width:100%"
+            @focus="() => loadCodeAccounts('')" @change="confirmSharedAccountUsage">
             <el-option v-for="a in codeAccountOptions" :key="a.id" :label="a.address" :value="a.address"></el-option>
           </el-select>
         </el-form-item>
@@ -592,7 +601,13 @@ createApp({
       } catch (e) { codeResult.value = '请求失败: ' + e.message; codeResultType.value = 'error'; }
       finally { codeLoading.value = false; }
     }
-    function fetchFromRow(row) { codeForm.mode = 'email'; codeForm.email = row.address; codeResult.value = ''; page.value = 'code'; }
+    async function fetchFromRow(row) {
+      codeForm.mode = 'email';
+      codeForm.email = row.address;
+      codeResult.value = '';
+      page.value = 'code';
+      await confirmSharedAccountUsage(row.address, row);
+    }
     function copyText(t) { navigator.clipboard.writeText(t); ElMessage.success('已复制'); }
 
     // Codex 一键：触发 OpenAI 发码 → 轮询取码
@@ -642,6 +657,33 @@ createApp({
         const r = await api('GET', '/api/admin/email/list?' + q);
         if (r.code === 200) codeAccountOptions.value = r.data.list;
       } finally { codeAccLoading.value = false; }
+    }
+    async function confirmSharedAccountUsage(email, selectedAccount = null) {
+      if (!email) return true;
+      const account = selectedAccount || codeAccountOptions.value.find(a => a.address === email);
+      const hasMultipleGrantees = Array.isArray(account?.grantees) && account.grantees.length > 1;
+      if (!account || (Number(account.shared) !== 1 && !hasMultipleGrantees)) return true;
+
+      try {
+        await ElMessageBox.confirm(
+          `“${email}”是多人共用账号。请确认当前没有其他人正在使用该账号登录或等待验证码，否则同时操作可能导致验证码错乱。`,
+          '确认共享账号无人同时登录',
+          {
+            type: 'warning',
+            confirmButtonText: '确认无人同时登录',
+            cancelButtonText: '取消选择',
+            closeOnClickModal: false,
+            closeOnPressEscape: false,
+            showClose: false,
+          }
+        );
+        return true;
+      } catch {
+        if (codeForm.email === email) codeForm.email = '';
+        codeResult.value = '';
+        ElMessage.info('已取消选择共享账号');
+        return false;
+      }
     }
     // 用户下拉(供「购买人」「分配」共用，来自 /api/admin/user/options)
     const userOptions = ref([]);
@@ -863,7 +905,7 @@ createApp({
       loginForm, loginLoading, doLogin, logout,
       registerForm, registerLoading, doRegister,
       codeForm, codeTypes, codeLoading, codeResult, codeResultType, fetchCode, fetchFromRow, copyText, ensureAccountsLoaded,
-      codeAccountOptions, codeAccLoading, loadCodeAccounts,
+      codeAccountOptions, codeAccLoading, loadCodeAccounts, confirmSharedAccountUsage,
       codexLoading, codexLoginAndFetch,
       stats,
       accountList, accTotal, accPage, accSearch, accSourceFilter, accHealthFilter, selectedAccounts, loadAccounts,
