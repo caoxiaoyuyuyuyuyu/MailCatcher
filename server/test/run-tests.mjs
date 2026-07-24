@@ -74,7 +74,8 @@ try {
   const QTOKEN = acc.data.token;
   ok((await api('GET', `/api/v1/message?token=${QTOKEN}&type=claude`)).data?.code?.includes('magic-link'), 'token 转发取到 magic-link');
   ok((await api('GET', `/api/v1/message?token=${QTOKEN}&type=gpt`)).message === 'no new message', '空邮件归一');
-  ok((await api('POST', '/api/admin/email/create', { address: 'self@x.com', source: 'self', password: 'p' }, ADMIN)).code === 200, 'admin 创建 self 账号');
+  const selfAcc = await api('POST', '/api/admin/email/create', { address: 'self@x.com', source: 'self', password: 'p' }, ADMIN);
+  ok(selfAcc.code === 200, 'admin 创建 self 账号');
   // 展示邮箱(outlook) 与 实际收件邮箱(mail.com) 分离
   await api('POST', '/api/admin/email/create', { address: 'codex@outlook.com', source: 'self', fetch_address: 'inbox@mail.com', password: 'p' }, ADMIN);
   const fwAcc = (await api('GET', '/api/admin/email/list?keyword=codex@outlook.com', null, ADMIN)).data.list[0];
@@ -94,6 +95,12 @@ try {
   const own = await api('POST', '/api/admin/email/create', { address: 'mine@priest.com', source: 'forward', forward_token: 'x' }, MEMBER);
   ok(own.code === 200 && own.data.token, '成员可自助添加账号(成为 owner)');
   ok((await api('GET', '/api/admin/email/list', null, MEMBER)).data.total === 1, '成员只看到自己添加的(1 个)');
+  ok((await api('POST', '/api/admin/email/inspect-imap', { ids: [own.data.id] })).code === 401, '批量 IMAP 巡检未登录被拒(401)');
+  const ownInspection = await api('POST', '/api/admin/email/inspect-imap', { ids: [own.data.id] }, MEMBER);
+  ok(ownInspection.code === 200 && ownInspection.data.skipped === 1 && ownInspection.data.results[0].status === 'skipped', 'forward 账号巡检时安全跳过');
+  const hiddenInspection = await api('POST', '/api/admin/email/inspect-imap', { ids: [selfAcc.data.id] }, MEMBER);
+  ok(hiddenInspection.code === 200 && hiddenInspection.data.total === 0, '成员巡检不能越权读取未归属账号');
+  ok((await api('POST', '/api/admin/email/inspect-imap', { ids: ['bad-id'] }, MEMBER)).code === 400, '批量巡检拒绝非法账号 ID');
   ok((await api('GET', '/api/v1/message?email=mine@priest.com&type=claude', null, MEMBER)).data?.code?.includes('magic-link'), '成员可取自己账号的码');
   ok((await api('GET', '/api/v1/message?email=fwd@priest.com&type=claude', null, MEMBER)).code === 403, '成员不能取未分配账号的码(403)');
   ok((await api('POST', '/api/admin/email/delete-batch', { ids: [1] }, MEMBER)).code === 400, '成员删不了别人的账号');
