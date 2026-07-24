@@ -465,8 +465,17 @@
   </el-dialog>
 
   <!-- IMAP 批量巡检 -->
-  <el-dialog v-model="imapInspectionDialog" title="IMAP 批量巡检结果" width="900px">
-    <div v-loading="imapInspectionLoading">
+  <el-dialog v-model="imapInspectionDialog" title="IMAP 批量巡检结果" width="900px"
+    :close-on-click-modal="!imapInspectionLoading" :close-on-press-escape="!imapInspectionLoading" :show-close="!imapInspectionLoading">
+    <div>
+      <div v-if="imapInspectionReport.total > 0" style="margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:8px;font-size:14px;color:#606266">
+          <span>已检查 {{ imapInspectionProgress.checked }} / {{ imapInspectionReport.total }}</span>
+          <span>剩余 {{ imapInspectionProgress.remaining }}</span>
+        </div>
+        <el-progress :percentage="imapInspectionProgress.percent" :stroke-width="12"
+          :status="imapInspectionProgress.percent===100?'success':''"></el-progress>
+      </div>
       <div class="stat-cards" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">
         <div class="stat-card" style="box-shadow:none;border:1px solid #ebeef5;padding:14px">
           <div class="label">总计</div><div class="value">{{ imapInspectionReport.total }}</div>
@@ -500,7 +509,7 @@
         <el-table-column prop="error" label="说明 / 错误" min-width="220" show-overflow-tooltip></el-table-column>
       </el-table>
     </div>
-    <template #footer><el-button @click="imapInspectionDialog=false">关闭</el-button></template>
+    <template #footer><el-button :disabled="imapInspectionLoading" @click="imapInspectionDialog=false">关闭</el-button></template>
   </el-dialog>
 
   <!-- 一次性密钥展示 -->
@@ -666,6 +675,8 @@ createApp({
     const selectedAccounts = ref([]);
     const imapInspectionDialog = ref(false), imapInspectionLoading = ref(false);
     const imapInspectionReport = reactive({ total: 0, success: 0, failed: 0, skipped: 0, duration_ms: 0, results: [] });
+    const imapInspectionProgress = reactive({ checked: 0, remaining: 0, percent: 0 });
+    const IMAP_INSPECTION_CLIENT_CONCURRENCY = 5;
     const accDialog = ref(false), accSaving = ref(false);
     const accForm = reactive({ id: null, source: 'self', address: '', password: '', appkey: '', fetch_address: '', forward_provider: '171mail', forward_token: '', shared: 0, purchaser: '', invoiced: 0, status: 1 });
     let accountsLoaded = false;
@@ -730,7 +741,38 @@ createApp({
         loadAccounts();
       }
     }
+    async function loadImapInspectionTargets(selected) {
+      if (selected.length) return selected;
+      const r = await api('GET', '/api/admin/email/list?page=1&pageSize=201');
+      if (r.code !== 200) throw new Error(r.message || '无法读取待巡检账号');
+      if (Number(r.data.total) > 200) throw new Error('可巡检账号超过 200 个，请勾选后分批巡检');
+      return r.data.list || [];
+    }
+    function failedInspectionResult(target, error, status = 'failed') {
+      return {
+        id: target.id,
+        address: target.address,
+        mailbox: target.fetch_address || target.address,
+        status,
+        error,
+        duration_ms: 0,
+      };
+    }
+    function updateImapInspectionProgress(results, completed, startedAt) {
+      const done = results.filter(Boolean);
+      imapInspectionReport.results = [...done];
+      imapInspectionReport.success = done.filter(result => result.status === 'success').length;
+      imapInspectionReport.failed = done.filter(result => result.status === 'failed').length;
+      imapInspectionReport.skipped = done.filter(result => result.status === 'skipped').length;
+      imapInspectionReport.duration_ms = Math.max(0, Date.now() - startedAt);
+      imapInspectionProgress.checked = completed;
+      imapInspectionProgress.remaining = Math.max(0, imapInspectionReport.total - completed);
+      imapInspectionProgress.percent = imapInspectionReport.total
+        ? Math.round((completed / imapInspectionReport.total) * 100)
+        : 0;
+    }
     async function inspectImapAccounts() {
+      const selected = [...selectedAccounts.value];
       const ids = selectedAccounts.value.map(a => a.id);
       if (!ids.length) {
         try {
@@ -744,19 +786,54 @@ createApp({
         }
       }
 
-      Object.assign(imapInspectionReport, { total: 0, success: 0, failed: 0, skipped: 0, duration_ms: 0, results: [] });
-      imapInspectionDialog.value = true;
       imapInspectionLoading.value = true;
       try {
-        const r = await api('POST', '/api/admin/email/inspect-imap', ids.length ? { ids } : {});
-        if (r.code === 200) {
-          Object.assign(imapInspectionReport, r.data);
-          if (r.data.failed > 0) ElMessage.warning(`巡检完成，发现 ${r.data.failed} 个异常账号`);
-          else ElMessage.success('IMAP 巡检完成');
-        } else {
-          imapInspectionDialog.value = false;
-          ElMessage.error(r.message || 'IMAP 巡检失败');
+        const targets = await loadImapInspectionTargets(selected);
+        const startedAt = Date.now();
+        const results = new Array(targets.length);
+        let nextIndex = 0;
+        let completed = 0;
+
+        Object.assign(imapInspectionReport, {
+          total: targets.length,
+          success: 0,
+          failed: 0,
+          skipped: 0,
+          duration_ms: 0,
+          results: [],
+        });
+        Object.assign(imapInspectionProgress, { checked: 0, remaining: targets.length, percent: 0 });
+        imapInspectionDialog.value = true;
+
+        async function worker() {
+          while (nextIndex < targets.length) {
+            const index = nextIndex;
+            nextIndex += 1;
+            const target = targets[index];
+            try {
+              const r = await api('POST', '/api/admin/email/inspect-imap', { ids: [target.id] });
+              if (r.code === 200 && r.data.results?.[0]) {
+                results[index] = r.data.results[0];
+              } else if (r.code === 200) {
+                results[index] = failedInspectionResult(target, '账号不存在或权限已变更', 'skipped');
+              } else {
+                results[index] = failedInspectionResult(target, r.message || 'IMAP 巡检失败');
+              }
+            } catch (error) {
+              results[index] = failedInspectionResult(target, error.message || 'IMAP 巡检失败');
+            }
+            completed += 1;
+            updateImapInspectionProgress(results, completed, startedAt);
+          }
         }
+
+        await Promise.all(Array.from(
+          { length: Math.min(IMAP_INSPECTION_CLIENT_CONCURRENCY, targets.length) },
+          () => worker(),
+        ));
+
+        if (imapInspectionReport.failed > 0) ElMessage.warning(`巡检完成，发现 ${imapInspectionReport.failed} 个异常账号`);
+        else ElMessage.success('IMAP 巡检完成');
       } catch (error) {
         imapInspectionDialog.value = false;
         ElMessage.error('IMAP 巡检失败: ' + error.message);
@@ -945,7 +1022,7 @@ createApp({
       stats,
       accountList, accTotal, accPage, accSearch, accSourceFilter, accHealthFilter, selectedAccounts, loadAccounts,
       accDialog, accSaving, accForm, showAddAccount, editAccount, saveAccount, deleteAccount, deleteSelectedAccounts, rotateToken,
-      imapInspectionDialog, imapInspectionLoading, imapInspectionReport, inspectImapAccounts,
+      imapInspectionDialog, imapInspectionLoading, imapInspectionReport, imapInspectionProgress, inspectImapAccounts,
       assignDialog, userOptions, assignUserId, assignAcc, showAssign, doGrant, doRevoke,
       statusDialog, statusForm, showStatus, saveStatus,
       importDialog, importText, importLoading, showImport, doImport,

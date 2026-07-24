@@ -90,7 +90,7 @@ MailCatcher 已从「纯接码工具」演进为「**多租户账号管理 + 统
 - **账号来源(source)**:
   - `self` — 自管邮箱，本地 IMAP/mailcom 取码（密码 AES-GCM 加密存）；可设 `fetch_address`(实际收件邮箱)与展示 `address` 分离——如 Codex 用 Outlook 订阅(展示)、验证码转发到公司 mail.com(收件)，取码时按转发邮件正文里的 `To:<原 Outlook>` 过滤区分
   - `forward` — 171mail 账号，转发到 `b.171mail.com/api/v1/message`（上游 token 加密存）
-- **IMAP 批量巡检**: 登录用户可巡检有权查看的指定或全部账号（最多 200 个）；限并发验证 IMAP 登录与 `INBOX` 访问，统计正常/异常/跳过，错误脱敏且不自动修改健康状态。非 IMAP 收件路径标记为跳过
+- **IMAP 批量巡检**: 登录用户可巡检有权查看的指定或全部账号（最多 200 个）；前端保持最多 5 个逐账号请求并实时显示已检查/剩余数量，后端验证 IMAP 登录与 `INBOX` 访问，统计正常/异常/跳过，错误脱敏且不自动修改健康状态。非 IMAP 收件路径标记为跳过
 - **App Key（外部系统接入）**: 管理员可创建 App Key（`ak_xxx` + `sk_xxx`），外部系统通过 `Authorization: Bearer ak:sk` 调用 API 接码。每个 App Key 可配账号范围、状态(active/disabled)，支持轮换。`app_keys` 表存 hash，明文仅创建/轮换时返回一次
 - **统一接码**: `GET /api/v1/message?token=&type=` 同步取码（兼容）；`POST /api/v1/message/async` 异步取码返回 `taskId`，`GET /api/v1/message/task/:taskId` 轮询结果。所有取码通过 BullMQ + Redis 队列处理，支持高并发和 worker 水平扩展
 - **状态系统**: 健康轴 `health_status`(active/error/banned/expired/disabled) + 归属/分配轴(`created_by` + `account_grants`)，
