@@ -15,13 +15,29 @@ export function generateToken(user) {
   );
 }
 
-export function authMiddleware(req, res, next) {
+async function resolveJwtUser(credential) {
+  const claims = jwt.verify(credential, JWT_SECRET);
+  const user = await db('users')
+    .select('id', 'username', 'role', 'status')
+    .where('id', claims.id)
+    .first();
+  if (!user || user.status === 0) return null;
+  return {
+    ...claims,
+    id: user.id,
+    username: user.username,
+    role: user.role,
+  };
+}
+
+export async function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ code: 401, message: '未登录' });
   }
   try {
-    req.user = jwt.verify(authHeader.slice(7), JWT_SECRET);
+    req.user = await resolveJwtUser(authHeader.slice(7));
+    if (!req.user) return res.status(401).json({ code: 401, message: '账号已停用或不存在' });
     next();
   } catch {
     return res.status(401).json({ code: 401, message: '登录已过期' });
@@ -44,7 +60,8 @@ export async function resolvePrincipal(req) {
   if (!h || !h.startsWith('Bearer ')) return null;
   const cred = h.slice(7);
   try {
-    return jwt.verify(cred, JWT_SECRET);
+    const user = await resolveJwtUser(cred);
+    if (user) return user;
   } catch {}
   const u = await db('users')
     .whereNotNull('api_key_hash')
@@ -76,9 +93,11 @@ export async function resolveIdentity(req) {
     if (ak) { req.appKey = ak; return ak; }
   }
   try {
-    const user = jwt.verify(cred, JWT_SECRET);
-    req.user = user;
-    return user;
+    const user = await resolveJwtUser(cred);
+    if (user) {
+      req.user = user;
+      return user;
+    }
   } catch {}
   const u = await db('users')
     .whereNotNull('api_key_hash')

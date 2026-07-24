@@ -13,7 +13,7 @@
 - **采购信息** — 每个账号可记购买人 + 购买状态（是否已开发票），创建/编辑时填写、列表展示
 - **账号状态系统** — 健康状态（正常/异常/封禁/到期/停用）+ 状态变更审计
 - **IMAP 批量巡检** — 勾选账号或巡检全部可见账号，实时显示已检查/剩余数量，统计正常/异常/跳过并列出失败原因；只读检查，不自动改健康状态
-- **安全** — IMAP 密码与上游 token AES-256-GCM 加密存储；查询令牌存 hash、明文仅显示一次；日志脱敏
+- **安全** — IMAP 密码、上游 token 与查询令牌副本使用 AES-256-GCM 加密存储；查询令牌另存 hash 用于校验；日志脱敏
 - **两种接码方式** — 账号令牌（免认证，适合 Agent）/ 邮箱 + 个人 API Key（直观，适合人工）
 - **管理后台** — Web UI 管理用户、账号、服务、日志
 
@@ -55,7 +55,7 @@ ENCRYPTION_KEY=请设置随机密钥 JWT_SECRET=请设置随机密钥 npm start
 
 > **Gazeta/Onet 邮箱**：`@gazeta.pl` 使用受控 Chromium 网页登录；`@onet.pl` 默认使用官方 IMAP（`imap.poczta.onet.pl:993`，SSL），避免网页登录的 reCAPTCHA。若确实需要网页模式，可设置 `ONET_ACCESS_MODE=webmail`，但验证码挑战/二步验证会返回“需要额外验证，暂不支持自动取码”。Onet 账号仍必须先完成官方服务启用；真实密码、Cookie 和邮件正文不得进入日志或测试 fixture。
 
-> 不论哪种来源，对外都用 **MailCatcher 自己签发的查询令牌**（库内存 hash）；171mail 的上游 token 仅作内部加密凭证。
+> 不论哪种来源，对外都用 **MailCatcher 自己签发的查询令牌**（库内存 hash + 加密副本）；admin、归属人和被分配用户可在账号列表复制。171mail 的上游 token 仅作内部加密凭证。
 
 ## 接码（两种方式）
 
@@ -103,7 +103,7 @@ mailcatcher user list / server list / log list / stats
 
 1. **注册账号**：首页「注册」→ 用 `@apexin.ai` 邮箱 + 密码二次确认完成注册，注册后即可登录（默认 `member`）。
 2. **升级管理员**（admin）：在用户管理里把需要的成员升级为 admin。
-3. **添加账号**：账号管理 → 添加账号，选来源 self/forward；创建后**一次性**显示查询令牌。
+3. **添加账号**：账号管理 → 添加账号，选来源 self/forward；创建后显示查询令牌，之后 admin、归属人和被分配用户可在列表复制。无法安全迁移的旧账号需先由归属人或管理员轮换。
 4. **巡检**：账号管理 →「批量巡检 IMAP」。勾选时只巡检所选账号；不勾选时巡检当前用户有权查看的全部账号（单次最多 200 个）。
 5. **接码**：网页登录后「在线接码」按邮箱选账号取码；或脚本用令牌/API Key 取码。
 
@@ -149,6 +149,7 @@ mailcatcher user list / server list / log list / stats
 | POST | `/api/admin/email/grant` | 分配账号给用户（owner/admin；独占替换、共享多人） |
 | POST | `/api/admin/email/revoke` | 收回某用户的分配 |
 | GET | `/api/admin/user/options` | 用户下拉(id+名)，供分配用 |
+| POST | `/api/admin/email/reveal-token` | 查看并复制完整查询令牌（admin/owner/被分配用户） |
 | POST | `/api/admin/email/rotate-token` | 轮换查询令牌 |
 | POST | `/api/admin/email/import` | 批量导入（self） |
 | POST | `/api/admin/email/inspect-imap` | 提交异步 IMAP 巡检；必须传 `{"ids":[1,2]}`，每批最多 200 个，返回 `202` 和 `batch_id` |
@@ -188,7 +189,8 @@ server/public/index.html        # 完整前端 UI
 ## 注意事项
 
 - **环境变量**: 生产必须设置 `ENCRYPTION_KEY`、`JWT_SECRET`；可选 `MAILCATCHER_DATA_DIR`、`FORWARD_171_BASE`、`CHROME_PATH`、`WEBMAIL_SCAN_LIMIT`、`ONET_ACCESS_MODE=webmail`、`IMAP_INSPECTION_GLOBAL_CONCURRENCY`（跨实例全局并发，默认 5、最高 10）、`IMAP_INSPECTION_GLOBAL_RATE_LIMIT` / `IMAP_INSPECTION_GLOBAL_RATE_WINDOW_MS`（全局默认每分钟启动 30 次）、`IMAP_INSPECTION_MAX_PENDING`（全局最大等待/执行任务，默认 250）、`IMAP_INSPECTION_ACCOUNT_COOLDOWN_MS`（任务完成后的同账号结果冷却，默认 30000）、`IMAP_INSPECTION_USER_LIMIT` / `IMAP_INSPECTION_USER_WINDOW_MS`（每用户默认 10 分钟 200 次）、`IMAP_INSPECTION_TIMEOUT_MS`（单账号连接超时，默认 20000）、`IMAP_INSPECTION_BATCH_TTL_MS`（批次结果保留，默认 30 分钟）
-- **令牌一次性**: 查询令牌 / API Key 创建或轮换时明文仅显示一次，库内只存 hash
+- **查询令牌复制**: 查询令牌在库内同时保存 hash 与 AES-GCM 加密副本；admin、归属人及被分配用户可以复制。无法安全迁移的旧账号需先轮换
+- **API Key 一次性**: 个人 API Key / App Key 创建或轮换时明文仅显示一次，库内只存 hash
 - **应用专用密码**: Gmail/Outlook 等 self 账号需使用应用专用密码
 - **30 分钟窗口**: 本地 IMAP 默认只查询最近 30 分钟邮件，可用 `FETCH_LOOKBACK_MINUTES` 调整
 - **171mail 上游**: 偶有抖动，转发适配器已内置重试与"无邮件"归一化

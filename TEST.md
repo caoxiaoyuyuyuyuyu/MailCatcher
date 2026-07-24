@@ -8,8 +8,8 @@ npm install
 npm test        # 运行 IMAP/网页邮箱单元测试、页面静态测试和集成测试，均无需真实邮箱
 ```
 
-覆盖：加密往返 / token hash、登录与双角色(admin/member)、自助注册、forward 转发取码、
-**邮箱接码 + 用户 API Key**、成员权限隔离、管理员升降级(防自锁)、健康状态机、token 轮换、删除外键、
+覆盖：加密往返 / token hash + 加密副本、登录与双角色(admin/member)、自助注册、forward 转发取码、
+**邮箱接码 + 用户 API Key**、成员权限隔离、管理员升降级(防自锁)、健康状态机、token 复制/轮换、旧库迁移、删除外键、
 **类型匹配 `messageMatchesType`（含转发外层发件人被改写、靠正文原始 `From:` 命中的场景）**，
 以及 IMAP 批量巡检的跨实例全局并发、账号冷却、用户限流、同步批量上限、实时进度、成功/异常/跳过统计、`fetch_address`、密码脱敏、权限隔离与页面脚本语法。
 
@@ -122,6 +122,9 @@ curl -X POST http://localhost:3000/api/admin/email/revoke \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"id":1,"user_id":3}'
 curl -X POST http://localhost:3000/api/admin/email/rotate-token \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"id":1}'
+# admin / owner / 被分配用户复制完整 token；无法安全迁移的旧账号需先轮换
+curl -X POST http://localhost:3000/api/admin/email/reveal-token \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"id":1}'
 ```
 
 ### 7. IMAP 批量巡检
@@ -171,3 +174,4 @@ mailcatcher email status 1 banned / email rotate 1
 5. 用户管理（admin：升降级角色/重置密码/删除）、个人(API Key/改密)、服务配置、查询日志。
 6. 验证归属：member 登录后只见「在线接码 + 账号管理」，账号页只看到「自己添加 + 被分配给自己」的账号，可对自己的账号增删改/分配，看不到别人的，不能访问用户/日志接口。
 7. 验证共享账号提醒：在线接码页持续展示并发取码风险提示；从邮箱下拉框或账号列表选择共享账号时弹出确认，取消后清空选择；选择独占账号时不弹窗。
+8. 验证 token 复制：admin、账号归属人和被分配用户点击令牌列「复制」可得到完整 token；收回分配、停用、删除或降级成员后，旧 JWT 不再保留原权限；旧库可验证明文迁移后遗留列不再保存明文。

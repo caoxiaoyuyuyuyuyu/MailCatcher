@@ -95,6 +95,9 @@ try {
   const acc = await api('POST', '/api/admin/email/create', { address: 'fwd@priest.com', source: 'forward', forward_token: 'up' }, ADMIN);
   ok(acc.code === 200 && acc.data.token, 'admin 创建 forward 账号并返回 token');
   const QTOKEN = acc.data.token;
+  ok((await api('POST', '/api/admin/email/reveal-token', { id: acc.data.id }, ADMIN)).data?.token === QTOKEN, 'admin 可复制账号完整 token');
+  const listedAcc = (await api('GET', '/api/admin/email/list?keyword=fwd@priest.com', null, ADMIN)).data.list[0];
+  ok(listedAcc.token === undefined && listedAcc.token_enc === undefined, '账号列表不泄露完整或加密 token');
   ok((await api('GET', `/api/v1/message?token=${QTOKEN}&type=claude`)).data?.code?.includes('magic-link'), 'token 转发取到 magic-link');
   ok((await api('GET', `/api/v1/message?token=${QTOKEN}&type=gpt`)).message === 'no new message', '空邮件归一');
   const selfAcc = await api('POST', '/api/admin/email/create', { address: 'self@x.com', source: 'self', password: 'p' }, ADMIN);
@@ -128,6 +131,7 @@ try {
   const own = await api('POST', '/api/admin/email/create', { address: 'mine@priest.com', source: 'forward', forward_token: 'x' }, MEMBER);
   ok(own.code === 200 && own.data.token, '成员可自助添加账号(成为 owner)');
   ok((await api('GET', '/api/admin/email/list', null, MEMBER)).data.total === 1, '成员只看到自己添加的(1 个)');
+  ok((await api('POST', '/api/admin/email/reveal-token', { id: own.data.id }, MEMBER)).data?.token === own.data.token, '成员可复制自己归属账号的 token');
   ok((await api('POST', '/api/admin/email/inspect-imap', { ids: [own.data.id] })).code === 401, '批量 IMAP 巡检未登录被拒(401)');
   const ownInspection = await api('POST', '/api/admin/email/inspect-imap', { ids: [own.data.id] }, MEMBER);
   const ownInspectionResult = await waitInspection(ownInspection.data.batch_id, MEMBER);
@@ -152,7 +156,12 @@ try {
   ok((await api('GET', '/api/admin/user/list', null, MEMBER)).code === 403, '成员不能管理用户(403)');
   ok((await api('GET', '/api/admin/logs/email', null, MEMBER)).code === 403, '成员不能看日志(403)');
   const fwdId = (await api('GET', '/api/admin/email/list?keyword=fwd@priest.com', null, ADMIN)).data.list[0].id;
+  ok((await api('POST', '/api/admin/email/reveal-token', { id: fwdId }, MEMBER)).code === 403, '未分配成员不能复制账号 token');
   ok((await api('POST', '/api/admin/email/grant', { id: fwdId, user_id: memberId }, ADMIN)).code === 200, 'admin 分配账号给成员');
+  ok((await api('POST', '/api/admin/email/reveal-token', { id: fwdId }, MEMBER)).data?.token === QTOKEN, '分配后成员可复制账号 token');
+  ok((await api('POST', '/api/admin/email/revoke', { id: fwdId, user_id: memberId }, ADMIN)).code === 200, 'admin 收回账号分配');
+  ok((await api('POST', '/api/admin/email/reveal-token', { id: fwdId }, MEMBER)).code === 403, '收回后旧 JWT 不能再复制账号 token');
+  await api('POST', '/api/admin/email/grant', { id: fwdId, user_id: memberId }, ADMIN);
   ok((await api('GET', '/api/v1/message?email=fwd@priest.com&type=claude', null, MEMBER)).data?.code?.includes('magic-link'), '分配后成员可取该账号的码');
   ok((await api('GET', '/api/admin/email/list', null, MEMBER)).data.total === 2, '分配后成员可见 2 个(自己+被分配)');
   ok((await api('POST', '/api/admin/email/grant', { id: fwdId, user_id: 1 }, MEMBER)).code === 403, '成员不能分配非自己的账号(403)');
@@ -166,12 +175,23 @@ try {
   await api('POST', '/api/admin/email/grant', { id: sh.data.id, user_id: 1 }, ADMIN);
   const shG = (await api('GET', '/api/admin/email/list?keyword=sh@priest.com', null, ADMIN)).data.list[0].grantees;
   ok(shG.length === 2, '共享账号：可分给多人');
+  await api('POST', '/api/admin/email/grant', { id: sh.data.id, user_id: (await api('GET', '/api/admin/user/list', null, ADMIN)).data.list.find(u => u.username === 'm2@apexin.ai').id }, ADMIN);
+  ok((await api('DELETE', `/api/admin/user/delete/${(await api('GET', '/api/admin/user/list', null, ADMIN)).data.list.find(u => u.username === 'm2@apexin.ai').id}`, null, ADMIN)).code === 200, 'admin 删除成员');
+  ok((await api('POST', '/api/admin/email/reveal-token', { id: sh.data.id }, MEMBER_TWO)).code === 401, '删除成员后旧 JWT 立即失效');
+  const shAfterDelete = (await api('GET', '/api/admin/email/list?keyword=sh@priest.com', null, ADMIN)).data.list[0].grantees;
+  ok(!shAfterDelete.some(grant => grant.username === 'm2@apexin.ai'), '删除成员同时清理账号分配');
+
+  await api('PUT', '/api/admin/user/update', { id: memberId, status: 0 }, ADMIN);
+  ok((await api('POST', '/api/admin/email/reveal-token', { id: fwdId }, MEMBER)).code === 401, '停用成员后旧 JWT 立即失效');
+  await api('PUT', '/api/admin/user/update', { id: memberId, status: 1 }, ADMIN);
 
   console.log('## 管理员升降级');
   ok((await api('PUT', '/api/admin/user/update', { id: memberId, role: 'admin' }, ADMIN)).code === 200, 'admin 把成员升级为 admin');
   const reLogin = await api('POST', '/api/admin/login', { username: 'm1@apexin.ai', password: 'secret1' });
   ok(reLogin.data.role === 'admin', '该用户重新登录已是 admin');
   ok((await api('GET', '/api/admin/user/list', null, reLogin.data.accessToken)).code === 200, '升级后可管理用户');
+  await api('PUT', '/api/admin/user/update', { id: memberId, role: 'member' }, ADMIN);
+  ok((await api('GET', '/api/admin/user/list', null, reLogin.data.accessToken)).code === 403, '降级后旧 admin JWT 不再保留管理员权限');
   ok((await api('PUT', '/api/admin/user/update', { id: adminLogin.data.id, role: 'member' }, ADMIN)).code === 400, 'admin 不能改自己的角色(防自锁)');
 
   console.log('## 状态机 / 轮换 / 删除(FK)');
@@ -180,6 +200,7 @@ try {
   await api('POST', '/api/admin/email/set-status', { id: 1, health_status: 'active' }, ADMIN);
   const rot = await api('POST', '/api/admin/email/rotate-token', { id: 1 }, ADMIN);
   ok(rot.data.token !== QTOKEN && (await api('GET', `/api/v1/message?token=${QTOKEN}&type=claude`)).code === 401, '轮换后旧 token 失效');
+  ok((await api('POST', '/api/admin/email/reveal-token', { id: 1 }, ADMIN)).data?.token === rot.data.token, '轮换后复制得到新 token');
   const delAcc = await api('POST', '/api/admin/email/create', { address: 'del@priest.com', source: 'forward', forward_token: 'x' }, ADMIN);
   await api('GET', `/api/v1/message?token=${delAcc.data.token}&type=claude`); // 产生日志
   ok((await api('POST', '/api/admin/email/delete-batch', { ids: [delAcc.data.id] }, ADMIN)).data.deleted === 1, '删除有日志的账号成功(不再 FK 500)');
