@@ -157,9 +157,11 @@
         <el-button type="primary" @click="loadAccounts">搜索</el-button>
         <el-button type="success" @click="showAddAccount">添加账号</el-button>
         <el-button type="warning" @click="showImport">批量导入(自管)</el-button>
+        <el-button type="primary" plain :loading="imapInspectionLoading" @click="inspectImapAccounts">批量巡检 IMAP</el-button>
         <el-button type="danger" @click="deleteSelectedAccounts" :disabled="!selectedAccounts.length">批量删除</el-button>
       </div>
-      <p class="hint" style="margin:-8px 0 12px">你能看到：自己添加的 + 管理员分配给你的账号。任何人都可添加账号（成为归属人）；他人添加的账号由其归属人或管理员分配。</p>
+      <p class="hint" style="margin:-8px 0 6px">你能看到：自己添加的 + 管理员分配给你的账号。任何人都可添加账号（成为归属人）；他人添加的账号由其归属人或管理员分配。</p>
+      <p class="hint" style="margin:0 0 12px">巡检：勾选后只检查所选账号；未选择时巡检全部可见账号（最多 200 个）。仅验证 IMAP 登录和收件箱访问，不发送测试邮件，也不会自动修改健康状态。</p>
       <el-table :data="accountList" border stripe @selection-change="v => selectedAccounts = v" max-height="560">
         <el-table-column type="selection" width="42"></el-table-column>
         <el-table-column label="邮箱地址" min-width="190" show-overflow-tooltip>
@@ -462,6 +464,54 @@
     <template #footer><el-button @click="importDialog=false">取消</el-button><el-button type="primary" :loading="importLoading" @click="doImport">导入</el-button></template>
   </el-dialog>
 
+  <!-- IMAP 批量巡检 -->
+  <el-dialog v-model="imapInspectionDialog" title="IMAP 批量巡检结果" width="900px"
+    :close-on-click-modal="!imapInspectionLoading" :close-on-press-escape="!imapInspectionLoading" :show-close="!imapInspectionLoading">
+    <div>
+      <div v-if="imapInspectionReport.total > 0" style="margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:8px;font-size:14px;color:#606266">
+          <span>已检查 {{ imapInspectionProgress.checked }} / {{ imapInspectionReport.total }}</span>
+          <span>剩余 {{ imapInspectionProgress.remaining }}</span>
+        </div>
+        <el-progress :percentage="imapInspectionProgress.percent" :stroke-width="12"
+          :status="imapInspectionProgress.percent===100?'success':''"></el-progress>
+      </div>
+      <div class="stat-cards" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">
+        <div class="stat-card" style="box-shadow:none;border:1px solid #ebeef5;padding:14px">
+          <div class="label">总计</div><div class="value">{{ imapInspectionReport.total }}</div>
+        </div>
+        <div class="stat-card" style="box-shadow:none;border:1px solid #ebeef5;padding:14px">
+          <div class="label">正常</div><div class="value" style="color:#67c23a">{{ imapInspectionReport.success }}</div>
+        </div>
+        <div class="stat-card" style="box-shadow:none;border:1px solid #ebeef5;padding:14px">
+          <div class="label">异常</div><div class="value" style="color:#f56c6c">{{ imapInspectionReport.failed }}</div>
+        </div>
+        <div class="stat-card" style="box-shadow:none;border:1px solid #ebeef5;padding:14px">
+          <div class="label">跳过</div><div class="value" style="color:#909399">{{ imapInspectionReport.skipped }}</div>
+        </div>
+      </div>
+      <p class="hint" style="margin-bottom:12px">巡检耗时 {{ imapInspectionReport.duration_ms }} ms。正常表示当前凭据可以登录 IMAP 并打开 INBOX，不代表测试邮件一定能投递成功。</p>
+      <el-table :data="imapInspectionReport.results" border stripe size="small" max-height="480">
+        <el-table-column prop="address" label="账号邮箱" min-width="180" show-overflow-tooltip></el-table-column>
+        <el-table-column prop="mailbox" label="实际收件邮箱" min-width="180" show-overflow-tooltip></el-table-column>
+        <el-table-column label="结果" width="82" align="center">
+          <template #default="{row}">
+            <el-tag size="small" :type="row.status==='success'?'success':(row.status==='failed'?'danger':'info')">
+              {{ row.status==='success'?'正常':(row.status==='failed'?'异常':'跳过') }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="server" label="IMAP 服务" min-width="150" show-overflow-tooltip></el-table-column>
+        <el-table-column prop="messages" label="邮件数" width="72" align="center"></el-table-column>
+        <el-table-column label="耗时" width="82" align="center">
+          <template #default="{row}">{{ row.duration_ms }} ms</template>
+        </el-table-column>
+        <el-table-column prop="error" label="说明 / 错误" min-width="220" show-overflow-tooltip></el-table-column>
+      </el-table>
+    </div>
+    <template #footer><el-button :disabled="imapInspectionLoading" @click="imapInspectionDialog=false">关闭</el-button></template>
+  </el-dialog>
+
   <!-- 一次性密钥展示 -->
   <el-dialog v-model="secretDialog.show" :title="secretDialog.title" width="520px">
     <p class="hint">⚠ 以下内容仅显示这一次，请立即复制保存。</p>
@@ -623,6 +673,10 @@ createApp({
     const accountList = ref([]), accTotal = ref(0), accPage = ref(1);
     const accSearch = ref(''), accSourceFilter = ref(''), accHealthFilter = ref('');
     const selectedAccounts = ref([]);
+    const imapInspectionDialog = ref(false), imapInspectionLoading = ref(false);
+    const imapInspectionReport = reactive({ total: 0, success: 0, failed: 0, skipped: 0, duration_ms: 0, results: [] });
+    const imapInspectionProgress = reactive({ checked: 0, remaining: 0, percent: 0 });
+    const IMAP_INSPECTION_CLIENT_CONCURRENCY = 5;
     const accDialog = ref(false), accSaving = ref(false);
     const accForm = reactive({ id: null, source: 'self', address: '', password: '', appkey: '', fetch_address: '', forward_provider: '171mail', forward_token: '', shared: 0, purchaser: '', invoiced: 0, status: 1 });
     let accountsLoaded = false;
@@ -685,6 +739,106 @@ createApp({
       if (ok(await api('POST', '/api/admin/email/delete-batch', { ids: selectedAccounts.value.map(a => a.id) }), '已删除')) {
         selectedAccounts.value = [];
         loadAccounts();
+      }
+    }
+    async function loadImapInspectionTargets(selected) {
+      if (selected.length) return selected;
+      const r = await api('GET', '/api/admin/email/list?page=1&pageSize=201');
+      if (r.code !== 200) throw new Error(r.message || '无法读取待巡检账号');
+      if (Number(r.data.total) > 200) throw new Error('可巡检账号超过 200 个，请勾选后分批巡检');
+      return r.data.list || [];
+    }
+    function failedInspectionResult(target, error, status = 'failed') {
+      return {
+        id: target.id,
+        address: target.address,
+        mailbox: target.fetch_address || target.address,
+        status,
+        error,
+        duration_ms: 0,
+      };
+    }
+    function updateImapInspectionProgress(results, completed, startedAt) {
+      const done = results.filter(Boolean);
+      imapInspectionReport.results = [...done];
+      imapInspectionReport.success = done.filter(result => result.status === 'success').length;
+      imapInspectionReport.failed = done.filter(result => result.status === 'failed').length;
+      imapInspectionReport.skipped = done.filter(result => result.status === 'skipped').length;
+      imapInspectionReport.duration_ms = Math.max(0, Date.now() - startedAt);
+      imapInspectionProgress.checked = completed;
+      imapInspectionProgress.remaining = Math.max(0, imapInspectionReport.total - completed);
+      imapInspectionProgress.percent = imapInspectionReport.total
+        ? Math.round((completed / imapInspectionReport.total) * 100)
+        : 0;
+    }
+    async function inspectImapAccounts() {
+      const selected = [...selectedAccounts.value];
+      const ids = selectedAccounts.value.map(a => a.id);
+      if (!ids.length) {
+        try {
+          await ElMessageBox.confirm(
+            '当前未勾选账号，将巡检你有权查看的全部账号（最多 200 个）。是否继续？',
+            '批量巡检 IMAP',
+            { type: 'info', confirmButtonText: '开始巡检', cancelButtonText: '取消' },
+          );
+        } catch {
+          return;
+        }
+      }
+
+      imapInspectionLoading.value = true;
+      try {
+        const targets = await loadImapInspectionTargets(selected);
+        const startedAt = Date.now();
+        const results = new Array(targets.length);
+        let nextIndex = 0;
+        let completed = 0;
+
+        Object.assign(imapInspectionReport, {
+          total: targets.length,
+          success: 0,
+          failed: 0,
+          skipped: 0,
+          duration_ms: 0,
+          results: [],
+        });
+        Object.assign(imapInspectionProgress, { checked: 0, remaining: targets.length, percent: 0 });
+        imapInspectionDialog.value = true;
+
+        async function worker() {
+          while (nextIndex < targets.length) {
+            const index = nextIndex;
+            nextIndex += 1;
+            const target = targets[index];
+            try {
+              const r = await api('POST', '/api/admin/email/inspect-imap', { ids: [target.id] });
+              if (r.code === 200 && r.data.results?.[0]) {
+                results[index] = r.data.results[0];
+              } else if (r.code === 200) {
+                results[index] = failedInspectionResult(target, '账号不存在或权限已变更', 'skipped');
+              } else {
+                results[index] = failedInspectionResult(target, r.message || 'IMAP 巡检失败');
+              }
+            } catch (error) {
+              results[index] = failedInspectionResult(target, error.message || 'IMAP 巡检失败');
+            }
+            completed += 1;
+            updateImapInspectionProgress(results, completed, startedAt);
+          }
+        }
+
+        await Promise.all(Array.from(
+          { length: Math.min(IMAP_INSPECTION_CLIENT_CONCURRENCY, targets.length) },
+          () => worker(),
+        ));
+
+        if (imapInspectionReport.failed > 0) ElMessage.warning(`巡检完成，发现 ${imapInspectionReport.failed} 个异常账号`);
+        else ElMessage.success('IMAP 巡检完成');
+      } catch (error) {
+        imapInspectionDialog.value = false;
+        ElMessage.error('IMAP 巡检失败: ' + error.message);
+      } finally {
+        imapInspectionLoading.value = false;
       }
     }
     async function rotateToken(row) {
@@ -868,6 +1022,7 @@ createApp({
       stats,
       accountList, accTotal, accPage, accSearch, accSourceFilter, accHealthFilter, selectedAccounts, loadAccounts,
       accDialog, accSaving, accForm, showAddAccount, editAccount, saveAccount, deleteAccount, deleteSelectedAccounts, rotateToken,
+      imapInspectionDialog, imapInspectionLoading, imapInspectionReport, imapInspectionProgress, inspectImapAccounts,
       assignDialog, userOptions, assignUserId, assignAcc, showAssign, doGrant, doRevoke,
       statusDialog, statusForm, showStatus, saveStatus,
       importDialog, importText, importLoading, showImport, doImport,
