@@ -82,6 +82,7 @@ async function ensureSchema() {
       t.string('forward_provider').defaultTo('');
       t.text('forward_token_enc').defaultTo('');
       t.text('token_hash');
+      t.text('token_enc').defaultTo('');
       t.string('token_prefix').defaultTo('');
       t.string('health_status', 20).defaultTo('active');
       t.integer('fail_count').defaultTo(0);
@@ -177,6 +178,7 @@ async function ensureSchema() {
     ['forward_provider', t => t.string('forward_provider').defaultTo('')],
     ['forward_token_enc', t => t.text('forward_token_enc').defaultTo('')],
     ['token_hash', t => t.text('token_hash')],
+    ['token_enc', t => t.text('token_enc').defaultTo('')],
     ['token_prefix', t => t.string('token_prefix').defaultTo('')],
     ['health_status', t => t.string('health_status', 20).defaultTo('active')],
     ['fail_count', t => t.integer('fail_count').defaultTo(0)],
@@ -206,13 +208,17 @@ async function backfillLegacy() {
   const hasLegacyPass = await db.schema.hasColumn('emails', 'password');
   if (!hasLegacyToken && !hasLegacyPass) return;
 
-  const rows = await db('emails').select('id', 'token_hash', 'password_enc',
+  const rows = await db('emails').select('id', 'token_hash', 'token_enc', 'password_enc',
     ...(hasLegacyToken ? [db.raw('"token"')] : [db.raw("'' as token")]),
     ...(hasLegacyPass ? [db.raw('"password"')] : [db.raw("'' as password")])
   );
   for (const r of rows) {
     if (!r.token_hash && r.token) {
-      await db('emails').where('id', r.id).update({ token_hash: hashToken(r.token), token_prefix: maskToken(r.token) });
+      await db('emails').where('id', r.id).update({
+        token_hash: hashToken(r.token),
+        token_enc: encrypt(r.token),
+        token_prefix: maskToken(r.token),
+      });
     }
     if ((!r.password_enc || r.password_enc === '') && r.password) {
       await db('emails').where('id', r.id).update({ password_enc: encrypt(r.password) });

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import db, { hasLegacyTokenColumn } from '../db.js';
 import { authMiddleware, requireRole, isAdmin } from '../middleware/auth.js';
 import { testImapConnection } from '../services/imap.js';
-import { encrypt, generateApiToken, hashToken, maskToken } from '../services/crypto.js';
+import { decrypt, encrypt, generateApiToken, hashToken, maskToken } from '../services/crypto.js';
 
 const router = Router();
 router.use(authMiddleware);
@@ -18,7 +18,10 @@ async function checkLegacyToken() {
 
 const getAccount = (id) => db('emails').where('id', id).first();
 const hasGrant = async (accountId, userId) => !!(await db('account_grants').where({ account_id: accountId, user_id: userId }).first());
-function issueToken() { const token = generateApiToken(); return { token, token_hash: hashToken(token), token_prefix: maskToken(token) }; }
+function issueToken() {
+  const token = generateApiToken();
+  return { token, token_hash: hashToken(token), token_enc: encrypt(token), token_prefix: maskToken(token) };
+}
 
 async function canUse(req, acc) { return isAdmin(req) || acc.created_by === req.user.id || await hasGrant(acc.id, req.user.id); }
 async function canManage(req, acc) { return isAdmin(req) || acc.created_by === req.user.id; }
@@ -85,7 +88,7 @@ router.post('/create', async (req, res) => {
   if (!['self', 'forward'].includes(source)) return res.json({ code: 400, message: '非法来源' });
   if (source === 'forward' && !forward_token) return res.json({ code: 400, message: 'forward 账号必须提供上游 token' });
 
-  const { token, token_hash, token_prefix } = issueToken();
+  const { token, token_hash, token_enc, token_prefix } = issueToken();
   try {
     const row = {
       address, source, appkey: appkey || '', batch_no: batch_no || '',
@@ -93,7 +96,7 @@ router.post('/create', async (req, res) => {
       fetch_address: source === 'self' ? (fetch_address || '') : '',
       forward_provider: source === 'forward' ? forward_provider : '',
       forward_token_enc: source === 'forward' ? encrypt(forward_token) : '',
-      token_hash, token_prefix, created_by: req.user.id, shared: shared ? 1 : 0,
+      token_hash, token_enc, token_prefix, created_by: req.user.id, shared: shared ? 1 : 0,
       purchaser: purchaser || '', invoiced: invoiced ? 1 : 0,
       health_status: 'active', status: 1,
     };
@@ -180,14 +183,33 @@ router.post('/revoke', async (req, res) => {
   res.json({ code: 200, message: 'success' });
 });
 
+router.post('/reveal-token', async (req, res) => {
+  const { id } = req.body;
+  if (!id) return res.json({ code: 400, message: 'id 不能为空' });
+  const acc = await getAccount(id);
+  if (!acc) return res.json({ code: 404, message: '账号不存在' });
+  if (!await canUse(req, acc)) return res.json({ code: 403, message: '无权复制该账号令牌' });
+  if (!acc.token_enc) {
+    return res.json({ code: 409, message: '旧账号令牌无法恢复，请先由归属人或管理员轮换令牌' });
+  }
+  try {
+    const token = decrypt(acc.token_enc);
+    if (!token || hashToken(token) !== acc.token_hash) throw new Error('token mismatch');
+    res.set('Cache-Control', 'no-store');
+    return res.json({ code: 200, data: { token }, message: 'success' });
+  } catch {
+    return res.json({ code: 409, message: '账号令牌无法解密，请先由归属人或管理员轮换令牌' });
+  }
+});
+
 router.post('/rotate-token', async (req, res) => {
   const { id } = req.body;
   if (!id) return res.json({ code: 400, message: 'id 不能为空' });
   const acc = await getAccount(id);
   if (!acc) return res.json({ code: 404, message: '账号不存在' });
   if (!await canManage(req, acc)) return res.json({ code: 403, message: '无权操作该账号' });
-  const { token, token_hash, token_prefix } = issueToken();
-  const updates = { token_hash, token_prefix, updated_at: db.fn.now() };
+  const { token, token_hash, token_enc, token_prefix } = issueToken();
+  const updates = { token_hash, token_enc, token_prefix, updated_at: db.fn.now() };
   if (await checkLegacyToken()) updates.token = token_hash;
   await db('emails').where('id', id).update(updates);
   res.json({ code: 200, data: { token }, message: 'success' });
@@ -241,10 +263,10 @@ router.post('/import', async (req, res) => {
         ({ address, password = '', appkey = '' } = item);
       }
       if (!address) continue;
-      const { token, token_hash, token_prefix } = issueToken();
+      const { token, token_hash, token_enc, token_prefix } = issueToken();
       const row = {
         source: 'self', address, password_enc: encrypt(password), appkey, batch_no,
-        token_hash, token_prefix, created_by: req.user.id, health_status: 'active', status: 1,
+        token_hash, token_enc, token_prefix, created_by: req.user.id, health_status: 'active', status: 1,
       };
       if (legacy) row.token = token_hash;
       try {

@@ -174,9 +174,10 @@
         <el-table-column label="类型" width="80" align="center">
           <template #default="{row}"><el-tag size="small" :type="row.shared?'success':'info'">{{ row.shared?'共享':'独占' }}</el-tag></template>
         </el-table-column>
-        <el-table-column label="令牌" width="140">
+        <el-table-column label="令牌" width="180">
           <template #default="{row}">
             <span class="hint">{{ row.token_prefix || '—' }}</span>
+            <el-button link size="small" type="primary" @click="copyAccountToken(row)">复制</el-button>
             <el-button v-if="row.can_manage" link size="small" @click="rotateToken(row)">轮换</el-button>
           </template>
         </el-table-column>
@@ -593,7 +594,16 @@ createApp({
       finally { codeLoading.value = false; }
     }
     function fetchFromRow(row) { codeForm.mode = 'email'; codeForm.email = row.address; codeResult.value = ''; page.value = 'code'; }
-    function copyText(t) { navigator.clipboard.writeText(t); ElMessage.success('已复制'); }
+    async function copyText(t) {
+      try {
+        await navigator.clipboard.writeText(t);
+        ElMessage.success('已复制');
+        return true;
+      } catch {
+        ElMessage.error('自动复制失败，请手动复制');
+        return false;
+      }
+    }
 
     // Codex 一键：触发 OpenAI 发码 → 轮询取码
     const codexLoading = ref(false);
@@ -686,6 +696,14 @@ createApp({
         selectedAccounts.value = [];
         loadAccounts();
       }
+    }
+    async function copyAccountToken(row) {
+      const r = await api('POST', '/api/admin/email/reveal-token', { id: row.id });
+      if (r.code === 200 && r.data?.token) {
+        if (!await copyText(r.data.token)) showSecret('账号查询令牌（请手动复制）', r.data.token);
+      }
+      else if (r.code === 409) ElMessage.warning(r.message);
+      else ElMessage.error(r.message || '复制失败');
     }
     async function rotateToken(row) {
       if (!await confirmDanger('轮换后旧令牌立即失效，确定？', '轮换令牌', '轮换')) return;
@@ -867,7 +885,7 @@ createApp({
       codexLoading, codexLoginAndFetch,
       stats,
       accountList, accTotal, accPage, accSearch, accSourceFilter, accHealthFilter, selectedAccounts, loadAccounts,
-      accDialog, accSaving, accForm, showAddAccount, editAccount, saveAccount, deleteAccount, deleteSelectedAccounts, rotateToken,
+      accDialog, accSaving, accForm, showAddAccount, editAccount, saveAccount, deleteAccount, deleteSelectedAccounts, copyAccountToken, rotateToken,
       assignDialog, userOptions, assignUserId, assignAcc, showAssign, doGrant, doRevoke,
       statusDialog, statusForm, showStatus, saveStatus,
       importDialog, importText, importLoading, showImport, doImport,

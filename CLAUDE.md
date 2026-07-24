@@ -112,7 +112,7 @@ MailCatcher 已从「纯接码工具」演进为「**多租户账号管理 + 统
 - `server/src/services/queue.js` — BullMQ 取码队列 + Worker（Redis 驱动，并发可配 `FETCH_CONCURRENCY`）
 - `server/src/routes/message.js` — 接码 API：同步 `GET /message`、异步 `POST /message/async`、轮询 `GET /message/task/:id`
 - `server/src/services/codexLogin.js` + `routes/codex.js` — 触发 OpenAI/Codex 邮箱 OTP 登录发码（`POST /api/v1/codex/send`）
-- `server/src/routes/emails.js` — 账号 CRUD（source/状态机/归属/分配 grant·revoke/token 轮换/购买人 `purchaser`+发票状态 `invoiced`；列表按归属过滤，增删改/分配限 owner 或 admin）
+- `server/src/routes/emails.js` — 账号 CRUD（source/状态机/归属/分配 grant·revoke/token 复制·轮换/购买人 `purchaser`+发票状态 `invoiced`；列表按归属过滤，增删改/分配限 owner 或 admin，复制允许 admin/owner/被分配用户）
 - `server/src/routes/users.js` — 用户管理（admin 升降级/重置/删除；防自锁）；`GET /options`(任何登录用户) 供分配下拉用
 - `server/src/routes/appKeys.js` — App Key CRUD（admin 创建/编辑/轮换/删除，外部系统凭证管理）
 - `server/src/routes/mailServers.js` — IMAP 服务器配置
@@ -141,10 +141,10 @@ mailcatcher log list / clear            # 日志管理
 - **转发发件人匹配**：转发邮件外层 `from` 会被改写成转发者地址，导致按发件人的类型过滤失效。`imap.js` 的 `messageMatchesType` 同时在 `from + subject + body` 里找已知发件地址（转发正文通常保留原始 `From:`），转发/直收都能命中
 - **数据库**：默认 SQLite（`DB_BACKEND=sqlite`），可切换 PostgreSQL（`DB_BACKEND=postgres`）。PG 配置通过 `DATABASE_URL` 或 `PG_HOST/PG_PORT/PG_USER/PG_PASSWORD/PG_DATABASE`
 - **App Key 外部接入**：管理员在「App Key」页创建凭证；外部系统用 `Authorization: Bearer ak_xxx:sk_xxx` 调接码 API（`/api/v1/message?email=xxx&type=gpt`）。可配账号范围（全部/指定 ID），支持启用/禁用/轮换
-- **环境变量**：生产必须设置 `ENCRYPTION_KEY`（加密 IMAP 密码/171mail token）与 `JWT_SECRET`；缺省会告警
+- **环境变量**：生产必须设置 `ENCRYPTION_KEY`（加密 IMAP 密码/171mail token/账号查询 token 副本）与 `JWT_SECRET`；缺省会告警
 - **账号来源**：`source=self` 走本地 IMAP/mailcom；Onet 默认使用 `imap.poczta.onet.pl:993`（SSL）；`source=forward` 转发到 171mail（密文存上游 token）
 - **Gazeta/Onet self**：`@gazeta.pl` 走 Chromium 网页邮箱；`@onet.pl` 默认走官方 IMAP，可用 `ONET_ACCESS_MODE=webmail` 强制网页模式。Onet 必须先在官方页面完成服务启用；网页模式遇到验证码挑战/二步验证返回 challenge 错误，不自动绕过
-- **方案乙**：所有账号对外都用我方签发的 token（库内存 hash，创建/轮换时明文仅显示一次）
+- **账号查询 token**：所有账号对外都用我方签发的 token；库内存 hash 用于校验、AES-GCM 加密副本用于授权复制。admin/owner/被分配用户可复制，升级前只有 hash 的旧账号需先轮换
 - **默认管理员**：admin / admin123，角色 `admin`（旧库 super_admin/team_admin 启动时自动迁移为 admin）
 - **自助注册**：`POST /api/admin/register`（公开），邮箱须 `@apexin.ai` 后缀 + 密码二次确认（≥6 位）；注册即 `member`，登录后由管理员在用户管理升级为 admin。邮箱登录大小写不敏感
 - **前端导航按角色显隐**：member 只见「在线接码 + 账号管理」（登录落地账号管理）；admin 另见控制台/用户管理/App Key/服务配置/查询日志/个人。账号页：任何人都能加账号/导入/删自己的；每行按 `can_manage` 显示编辑/状态/分配/删除按钮；「分配」弹窗按 `/api/admin/user/options` 选用户，调 `grant`/`revoke`
