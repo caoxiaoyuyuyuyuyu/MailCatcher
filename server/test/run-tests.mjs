@@ -4,6 +4,7 @@ import { spawn } from 'child_process';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import Database from 'better-sqlite3';
 
 const MOCK_PORT = 3120;
 const APP_PORT = 3119;
@@ -72,6 +73,14 @@ try {
   const acc = await api('POST', '/api/admin/email/create', { address: 'fwd@priest.com', source: 'forward', forward_token: 'up' }, ADMIN);
   ok(acc.code === 200 && acc.data.token, 'admin 创建 forward 账号并返回 token');
   const QTOKEN = acc.data.token;
+  const adminReveal = await api('POST', '/api/admin/email/reveal-token', { id: acc.data.id }, ADMIN);
+  ok(adminReveal.code === 200 && adminReveal.data?.token === QTOKEN, 'admin 可复制账号完整 token');
+  const sqlite = new Database(join(DATA_DIR, 'mailcatcher.db'));
+  const storedToken = sqlite.prepare('SELECT token_enc FROM emails WHERE id = ?').get(acc.data.id);
+  ok(storedToken.token_enc && storedToken.token_enc !== QTOKEN, '账号完整 token 仅加密存储');
+  sqlite.close();
+  const listedAcc = (await api('GET', '/api/admin/email/list?keyword=fwd@priest.com', null, ADMIN)).data.list[0];
+  ok(listedAcc.token === undefined && listedAcc.token_enc === undefined, '账号列表不泄露完整或加密 token');
   ok((await api('GET', `/api/v1/message?token=${QTOKEN}&type=claude`)).data?.code?.includes('magic-link'), 'token 转发取到 magic-link');
   ok((await api('GET', `/api/v1/message?token=${QTOKEN}&type=gpt`)).message === 'no new message', '空邮件归一');
   ok((await api('POST', '/api/admin/email/create', { address: 'self@x.com', source: 'self', password: 'p' }, ADMIN)).code === 200, 'admin 创建 self 账号');
@@ -94,13 +103,16 @@ try {
   const own = await api('POST', '/api/admin/email/create', { address: 'mine@priest.com', source: 'forward', forward_token: 'x' }, MEMBER);
   ok(own.code === 200 && own.data.token, '成员可自助添加账号(成为 owner)');
   ok((await api('GET', '/api/admin/email/list', null, MEMBER)).data.total === 1, '成员只看到自己添加的(1 个)');
+  ok((await api('POST', '/api/admin/email/reveal-token', { id: own.data.id }, MEMBER)).data?.token === own.data.token, '成员可复制自己归属账号的 token');
   ok((await api('GET', '/api/v1/message?email=mine@priest.com&type=claude', null, MEMBER)).data?.code?.includes('magic-link'), '成员可取自己账号的码');
   ok((await api('GET', '/api/v1/message?email=fwd@priest.com&type=claude', null, MEMBER)).code === 403, '成员不能取未分配账号的码(403)');
   ok((await api('POST', '/api/admin/email/delete-batch', { ids: [1] }, MEMBER)).code === 400, '成员删不了别人的账号');
   ok((await api('GET', '/api/admin/user/list', null, MEMBER)).code === 403, '成员不能管理用户(403)');
   ok((await api('GET', '/api/admin/logs/email', null, MEMBER)).code === 403, '成员不能看日志(403)');
   const fwdId = (await api('GET', '/api/admin/email/list?keyword=fwd@priest.com', null, ADMIN)).data.list[0].id;
+  ok((await api('POST', '/api/admin/email/reveal-token', { id: fwdId }, MEMBER)).code === 403, '未分配成员不能复制账号 token');
   ok((await api('POST', '/api/admin/email/grant', { id: fwdId, user_id: memberId }, ADMIN)).code === 200, 'admin 分配账号给成员');
+  ok((await api('POST', '/api/admin/email/reveal-token', { id: fwdId }, MEMBER)).data?.token === QTOKEN, '分配后成员可复制账号 token');
   ok((await api('GET', '/api/v1/message?email=fwd@priest.com&type=claude', null, MEMBER)).data?.code?.includes('magic-link'), '分配后成员可取该账号的码');
   ok((await api('GET', '/api/admin/email/list', null, MEMBER)).data.total === 2, '分配后成员可见 2 个(自己+被分配)');
   ok((await api('POST', '/api/admin/email/grant', { id: fwdId, user_id: 1 }, MEMBER)).code === 403, '成员不能分配非自己的账号(403)');
@@ -128,6 +140,14 @@ try {
   await api('POST', '/api/admin/email/set-status', { id: 1, health_status: 'active' }, ADMIN);
   const rot = await api('POST', '/api/admin/email/rotate-token', { id: 1 }, ADMIN);
   ok(rot.data.token !== QTOKEN && (await api('GET', `/api/v1/message?token=${QTOKEN}&type=claude`)).code === 401, '轮换后旧 token 失效');
+  ok((await api('POST', '/api/admin/email/reveal-token', { id: 1 }, ADMIN)).data?.token === rot.data.token, '轮换后复制得到新 token');
+  const legacyAcc = await api('POST', '/api/admin/email/create', { address: 'legacy@priest.com', source: 'forward', forward_token: 'x' }, ADMIN);
+  const legacyDb = new Database(join(DATA_DIR, 'mailcatcher.db'));
+  legacyDb.prepare("UPDATE emails SET token_enc = '' WHERE id = ?").run(legacyAcc.data.id);
+  legacyDb.close();
+  ok((await api('POST', '/api/admin/email/reveal-token', { id: legacyAcc.data.id }, ADMIN)).code === 409, '旧账号无加密 token 时提示先轮换');
+  const legacyRot = await api('POST', '/api/admin/email/rotate-token', { id: legacyAcc.data.id }, ADMIN);
+  ok((await api('POST', '/api/admin/email/reveal-token', { id: legacyAcc.data.id }, ADMIN)).data?.token === legacyRot.data.token, '旧账号轮换后可复制 token');
   const delAcc = await api('POST', '/api/admin/email/create', { address: 'del@priest.com', source: 'forward', forward_token: 'x' }, ADMIN);
   await api('GET', `/api/v1/message?token=${delAcc.data.token}&type=claude`); // 产生日志
   ok((await api('POST', '/api/admin/email/delete-batch', { ids: [delAcc.data.id] }, ADMIN)).data.deleted === 1, '删除有日志的账号成功(不再 FK 500)');

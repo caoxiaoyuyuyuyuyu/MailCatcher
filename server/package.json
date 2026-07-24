@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "test": "node test/imap-match.test.mjs && node test/forward-e2e.test.mjs && node test/webmail-browser.test.mjs && node test/gazeta.test.mjs && node test/onet.test.mjs && node test/webmail-routing.test.mjs && node test/docs-webmail.test.mjs && node test/run-tests.mjs"
+    "test": "node test/imap-match.test.mjs && node test/forward-e2e.test.mjs && node test/webmail-browser.test.mjs && node test/gazeta.test.mjs && node test/onet.test.mjs && node test/webmail-routing.test.mjs && node test/docs-webmail.test.mjs && node test/token-copy-ui.test.mjs && node test/run-tests.mjs"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
