@@ -2,6 +2,7 @@ import { Router } from 'express';
 import db, { hasLegacyTokenColumn } from '../db.js';
 import { authMiddleware, requireRole, isAdmin } from '../middleware/auth.js';
 import { testImapConnection } from '../services/imap.js';
+import { runBatchImapInspection } from '../services/imapInspection.js';
 import { encrypt, generateApiToken, hashToken, maskToken } from '../services/crypto.js';
 
 const router = Router();
@@ -9,6 +10,7 @@ router.use(authMiddleware);
 
 const adminOnly = requireRole('admin');
 const HEALTH = ['active', 'error', 'banned', 'expired', 'disabled'];
+const MAX_IMAP_INSPECTION_ACCOUNTS = 200;
 
 let HAS_LEGACY_TOKEN = null;
 async function checkLegacyToken() {
@@ -264,6 +266,50 @@ router.post('/test-connection', async (req, res) => {
     res.json({ code: 200, data: result, message: 'IMAP 连接成功' });
   } catch (err) {
     res.json({ code: 500, message: err.message });
+  }
+});
+
+router.post('/inspect-imap', async (req, res) => {
+  const requestedIds = req.body?.ids;
+  if (requestedIds !== undefined && !Array.isArray(requestedIds)) {
+    return res.json({ code: 400, message: 'ids 必须是数组' });
+  }
+
+  const ids = [...new Set((requestedIds || []).map(Number))];
+  if (ids.some(id => !Number.isInteger(id) || id <= 0)) {
+    return res.json({ code: 400, message: '账号 ID 不合法' });
+  }
+  if (ids.length > MAX_IMAP_INSPECTION_ACCOUNTS) {
+    return res.json({ code: 400, message: `一次最多巡检 ${MAX_IMAP_INSPECTION_ACCOUNTS} 个账号` });
+  }
+
+  let query = db('emails as e')
+    .select('e.id', 'e.address', 'e.fetch_address', 'e.source', 'e.password_enc', 'e.created_by')
+    .orderBy('e.id');
+
+  if (!isAdmin(req)) {
+    const granted = db('account_grants')
+      .where('user_id', req.user.id)
+      .whereRaw('account_id = e.id')
+      .select(db.raw('1'));
+    query = query.where(function () {
+      this.where('e.created_by', req.user.id).orWhereExists(granted);
+    });
+  }
+  if (ids.length) query = query.whereIn('e.id', ids);
+
+  try {
+    const accounts = await query.limit(MAX_IMAP_INSPECTION_ACCOUNTS + 1);
+    if (accounts.length > MAX_IMAP_INSPECTION_ACCOUNTS) {
+      return res.json({
+        code: 400,
+        message: `可巡检账号超过 ${MAX_IMAP_INSPECTION_ACCOUNTS} 个，请勾选后分批巡检`,
+      });
+    }
+    const report = await runBatchImapInspection(accounts);
+    res.json({ code: 200, data: report, message: '巡检完成' });
+  } catch (error) {
+    res.json({ code: 500, message: `批量巡检失败: ${error.message}` });
   }
 });
 

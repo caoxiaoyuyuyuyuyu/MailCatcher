@@ -12,6 +12,7 @@
 - **账号归属/分配** — 每个账号有归属人(谁添加谁拥有) + 独占/共享标志；归属人或 admin 可把账号分配给其他用户（独占号单人、共享号如 Codex 多人）
 - **采购信息** — 每个账号可记购买人 + 购买状态（是否已开发票），创建/编辑时填写、列表展示
 - **账号状态系统** — 健康状态（正常/异常/封禁/到期/停用）+ 状态变更审计
+- **IMAP 批量巡检** — 勾选账号或巡检全部可见账号，统计正常/异常/跳过并列出失败原因；只读检查，不自动改健康状态
 - **安全** — IMAP 密码与上游 token AES-256-GCM 加密存储；查询令牌存 hash、明文仅显示一次；日志脱敏
 - **两种接码方式** — 账号令牌（免认证，适合 Agent）/ 邮箱 + 个人 API Key（直观，适合人工）
 - **管理后台** — Web UI 管理用户、账号、服务、日志
@@ -101,7 +102,10 @@ mailcatcher user list / server list / log list / stats
 1. **注册账号**：首页「注册」→ 用 `@apexin.ai` 邮箱 + 密码二次确认完成注册，注册后即可登录（默认 `member`）。
 2. **升级管理员**（admin）：在用户管理里把需要的成员升级为 admin。
 3. **添加账号**：账号管理 → 添加账号，选来源 self/forward；创建后**一次性**显示查询令牌。
-4. **接码**：网页登录后「在线接码」按邮箱选账号取码；或脚本用令牌/API Key 取码。
+4. **巡检**：账号管理 →「批量巡检 IMAP」。勾选时只巡检所选账号；不勾选时巡检当前用户有权查看的全部账号（单次最多 200 个）。
+5. **接码**：网页登录后「在线接码」按邮箱选账号取码；或脚本用令牌/API Key 取码。
+
+> 巡检会使用已加密保存的收件凭据登录 IMAP 并打开 `INBOX`，可发现服务器配置、授权码/密码或收件箱访问异常。它不会主动发送测试邮件，因此不等同于端到端投递测试；结果也不会自动修改账号健康状态。`forward`、mail.com Web API、Gazeta/Onet Webmail 等非 IMAP 路径会标记为“跳过”。
 
 ## API 文档
 
@@ -145,6 +149,7 @@ mailcatcher user list / server list / log list / stats
 | GET | `/api/admin/user/options` | 用户下拉(id+名)，供分配用 |
 | POST | `/api/admin/email/rotate-token` | 轮换查询令牌 |
 | POST | `/api/admin/email/import` | 批量导入（self） |
+| POST | `/api/admin/email/inspect-imap` | 批量巡检 IMAP；body 可传 `{"ids":[1,2]}`，不传 ids 时巡检全部有权查看的账号（最多 200 个） |
 | DELETE | `/api/admin/email/delete/:id` | 删除 |
 | GET | `/api/admin/logs/email` | 查询日志（仅 admin） |
 | GET | `/api/admin/stats` | 统计 |
@@ -167,6 +172,7 @@ server/src/
 ├── routes/                     # auth / users / emails(账号) / mailServers / message / logs / claude
 └── services/
     ├── imap.js                 # 本地 IMAP/mailcom 取码（self）
+    ├── imapInspection.js       # IMAP 限并发批量巡检、统计与错误脱敏
     ├── mailcom.js              # mail.com Web API
     ├── forward171.js           # 171mail 转发适配器（forward）
     └── crypto.js               # AES-256-GCM 加解密 + token hash
@@ -176,8 +182,8 @@ server/public/index.html        # 完整前端 UI
 
 ## 注意事项
 
-- **环境变量**: 生产必须设置 `ENCRYPTION_KEY`、`JWT_SECRET`；可选 `MAILCATCHER_DATA_DIR`、`FORWARD_171_BASE`、`CHROME_PATH`、`WEBMAIL_SCAN_LIMIT`、`ONET_ACCESS_MODE=webmail`
+- **环境变量**: 生产必须设置 `ENCRYPTION_KEY`、`JWT_SECRET`；可选 `MAILCATCHER_DATA_DIR`、`FORWARD_171_BASE`、`CHROME_PATH`、`WEBMAIL_SCAN_LIMIT`、`ONET_ACCESS_MODE=webmail`、`IMAP_INSPECTION_CONCURRENCY`（巡检并发，默认 5、最高 10）、`IMAP_INSPECTION_TIMEOUT_MS`（单账号超时，默认 20000）
 - **令牌一次性**: 查询令牌 / API Key 创建或轮换时明文仅显示一次，库内只存 hash
 - **应用专用密码**: Gmail/Outlook 等 self 账号需使用应用专用密码
-- **10 分钟窗口**: 本地 IMAP 只查询最近 10 分钟邮件
+- **30 分钟窗口**: 本地 IMAP 默认只查询最近 30 分钟邮件，可用 `FETCH_LOOKBACK_MINUTES` 调整
 - **171mail 上游**: 偶有抖动，转发适配器已内置重试与"无邮件"归一化

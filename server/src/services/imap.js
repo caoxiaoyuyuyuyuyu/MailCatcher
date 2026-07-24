@@ -228,6 +228,11 @@ export function getMailboxAccessMode(emailAddress) {
   return 'imap';
 }
 
+export async function usesImapForAccount(emailAddress) {
+  if (getMailboxAccessMode(emailAddress) === 'webmail') return false;
+  return !await isMailcomDomain(emailAddress);
+}
+
 export async function fetchVerificationCode(emailAddress, password, type, recipient) {
   const provider = getWebmailProvider(emailAddress);
   if (provider && getMailboxAccessMode(emailAddress) === 'webmail') {
@@ -409,32 +414,42 @@ async function fetchViaImap(emailAddress, password, type, recipient) {
   }
 }
 
-export async function testImapConnection(emailAddress, password) {
+export async function testImapConnection(emailAddress, password, options = {}) {
   const serverConfig = await getServerConfig(emailAddress);
   if (!serverConfig) {
     throw new Error(`无法确定 ${emailAddress} 的 IMAP 服务器`);
   }
 
+  const timeoutMs = Math.min(120000, Math.max(1000, Number(options.timeoutMs) || 20000));
   const client = new ImapFlow({
     host: serverConfig.host,
     port: serverConfig.port,
     secure: serverConfig.secure,
     auth: { user: emailAddress, pass: password },
     logger: false,
+    connectionTimeout: timeoutMs,
+    greetingTimeout: timeoutMs,
+    socketTimeout: timeoutMs,
   });
 
   try {
     await client.connect();
-    const lock = await client.getMailboxLock('INBOX');
-    const status = client.mailbox;
-    lock.release();
-    await client.logout();
+    let lock;
+    let messages = 0;
+    try {
+      lock = await client.getMailboxLock('INBOX');
+      messages = Number(client.mailbox?.exists || 0);
+    } finally {
+      lock?.release();
+    }
     return {
       success: true,
       server: `${serverConfig.host}:${serverConfig.port}`,
-      messages: status?.exists || 0,
+      messages,
     };
   } catch (err) {
     throw new Error(`IMAP 连接失败: ${err.message}`);
+  } finally {
+    await client.logout().catch(() => {});
   }
 }
