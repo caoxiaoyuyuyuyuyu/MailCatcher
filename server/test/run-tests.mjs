@@ -9,6 +9,8 @@ const MOCK_PORT = 3120;
 const APP_PORT = 3119;
 const BASE = `http://localhost:${APP_PORT}`;
 const DATA_DIR = mkdtempSync(join(tmpdir(), 'mailcatcher-test-'));
+const IMAP_INSPECTION_QUEUE_NAME = `imap-inspection-integration-${process.pid}`;
+const FETCH_QUEUE_NAME = `fetch-code-integration-${process.pid}`;
 
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log('  ✓', m); } else { fail++; console.log('  ✗ FAIL:', m); } };
@@ -34,13 +36,32 @@ const mock = http.createServer((req, res) => {
 }).listen(MOCK_PORT);
 
 const app = spawn('node', ['src/index.js'], {
-  env: { ...process.env, PORT: APP_PORT, MAILCATCHER_DATA_DIR: DATA_DIR, FORWARD_171_BASE: `http://localhost:${MOCK_PORT}`, ENCRYPTION_KEY: 'test-enc-key', JWT_SECRET: 'test-jwt-key' },
+  env: {
+    ...process.env,
+    PORT: APP_PORT,
+    MAILCATCHER_DATA_DIR: DATA_DIR,
+    FORWARD_171_BASE: `http://localhost:${MOCK_PORT}`,
+    ENCRYPTION_KEY: 'test-enc-key',
+    JWT_SECRET: 'test-jwt-key',
+    FETCH_QUEUE_NAME,
+    IMAP_INSPECTION_USER_LIMIT: '2',
+    IMAP_INSPECTION_USER_WINDOW_MS: '60000',
+    IMAP_INSPECTION_QUEUE_NAME,
+  },
   stdio: ['ignore', 'ignore', 'inherit'],
 });
 function teardown(code) { app.kill(); mock.close(); try { rmSync(DATA_DIR, { recursive: true, force: true }); } catch {} process.exit(code); }
 async function waitReady() {
   for (let i = 0; i < 50; i++) { try { const r = await api('POST', '/api/admin/login', { username: 'admin', password: 'admin123' }); if (r.code) return; } catch {} await new Promise(r => setTimeout(r, 200)); }
   throw new Error('app 未能启动');
+}
+async function waitInspection(batchId, token) {
+  for (let i = 0; i < 100; i++) {
+    const result = await api('GET', `/api/admin/email/inspect-imap/batch/${batchId}`, null, token);
+    if (result.code === 200 && result.data.state === 'completed') return result;
+    await new Promise(r => setTimeout(r, 50));
+  }
+  throw new Error(`IMAP 巡检批次 ${batchId} 未完成`);
 }
 
 try {
@@ -67,6 +88,8 @@ try {
   const mLogin = await api('POST', '/api/admin/login', { username: 'M1@apexin.ai', password: 'secret1' });
   ok(mLogin.code === 200 && mLogin.data.role === 'member', '注册用户为 member（大小写不敏感登录）');
   const MEMBER = mLogin.data.accessToken;
+  await api('POST', '/api/admin/register', { email: 'm2@apexin.ai', password: 'secret2', confirmPassword: 'secret2' });
+  const MEMBER_TWO = (await api('POST', '/api/admin/login', { username: 'm2@apexin.ai', password: 'secret2' })).data.accessToken;
 
   console.log('## 账号管理（管理员）');
   const acc = await api('POST', '/api/admin/email/create', { address: 'fwd@priest.com', source: 'forward', forward_token: 'up' }, ADMIN);
@@ -76,6 +99,16 @@ try {
   ok((await api('GET', `/api/v1/message?token=${QTOKEN}&type=gpt`)).message === 'no new message', '空邮件归一');
   const selfAcc = await api('POST', '/api/admin/email/create', { address: 'self@x.com', source: 'self', password: 'p' }, ADMIN);
   ok(selfAcc.code === 200, 'admin 创建 self 账号');
+  const { default: Database } = await import('better-sqlite3');
+  const readImapConfigVersion = id => {
+    const inspectionDb = new Database(join(DATA_DIR, 'mailcatcher.db'), { readonly: true });
+    const version = inspectionDb.prepare('SELECT imap_config_version FROM emails WHERE id = ?').get(id)?.imap_config_version;
+    inspectionDb.close();
+    return version;
+  };
+  const initialImapConfigVersion = readImapConfigVersion(selfAcc.data.id);
+  await api('PUT', '/api/admin/email/update', { id: selfAcc.data.id, password: 'p-updated' }, ADMIN);
+  ok(readImapConfigVersion(selfAcc.data.id) === initialImapConfigVersion + 1, '修改 IMAP 密码会递增配置版本');
   // 展示邮箱(outlook) 与 实际收件邮箱(mail.com) 分离
   await api('POST', '/api/admin/email/create', { address: 'codex@outlook.com', source: 'self', fetch_address: 'inbox@mail.com', password: 'p' }, ADMIN);
   const fwAcc = (await api('GET', '/api/admin/email/list?keyword=codex@outlook.com', null, ADMIN)).data.list[0];
@@ -97,10 +130,22 @@ try {
   ok((await api('GET', '/api/admin/email/list', null, MEMBER)).data.total === 1, '成员只看到自己添加的(1 个)');
   ok((await api('POST', '/api/admin/email/inspect-imap', { ids: [own.data.id] })).code === 401, '批量 IMAP 巡检未登录被拒(401)');
   const ownInspection = await api('POST', '/api/admin/email/inspect-imap', { ids: [own.data.id] }, MEMBER);
-  ok(ownInspection.code === 200 && ownInspection.data.skipped === 1 && ownInspection.data.results[0].status === 'skipped', 'forward 账号巡检时安全跳过');
+  const ownInspectionResult = await waitInspection(ownInspection.data.batch_id, MEMBER);
+  ok(ownInspection.code === 202 && ownInspectionResult.data.skipped === 1 && ownInspectionResult.data.results[0].status === 'skipped', '异步巡检 forward 账号时安全跳过');
+  ok((await api('GET', `/api/admin/email/inspect-imap/batch/${ownInspection.data.batch_id}`, null, MEMBER_TWO)).code === 403, '其他成员不能查看巡检批次');
   const hiddenInspection = await api('POST', '/api/admin/email/inspect-imap', { ids: [selfAcc.data.id] }, MEMBER);
-  ok(hiddenInspection.code === 200 && hiddenInspection.data.total === 0, '成员巡检不能越权读取未归属账号');
+  ok(hiddenInspection.code === 202 && hiddenInspection.data.state === 'completed' && hiddenInspection.data.total === 0, '成员巡检不能越权读取未归属账号');
   ok((await api('POST', '/api/admin/email/inspect-imap', { ids: ['bad-id'] }, MEMBER)).code === 400, '批量巡检拒绝非法账号 ID');
+  ok((await api('POST', '/api/admin/email/inspect-imap', {}, MEMBER)).code === 400, '异步巡检必须显式传入账号 ID');
+  ok((await api('POST', '/api/admin/email/inspect-imap', { ids: Array.from({ length: 201 }, (_, index) => index + 1) }, MEMBER)).code === 400, '异步巡检一次最多 200 个账号');
+  ok((await api('POST', '/api/admin/email/test-connection', { address: 'raw@example.test', password: 'secret' }, MEMBER)).code === 400, '连接测试拒绝绕过队列的明文凭据');
+  const cachedInspection = await api('POST', '/api/admin/email/inspect-imap', { ids: [own.data.id] }, MEMBER);
+  ok(cachedInspection.code === 202 && cachedInspection.data.state === 'completed', '账号冷却期内重复巡检复用脱敏结果');
+  const rateLimitedInspection = await api('POST', '/api/admin/email/inspect-imap', { ids: [own.data.id] }, MEMBER);
+  ok(rateLimitedInspection.code === 429 && rateLimitedInspection.data.retry_after_ms > 0, '超过用户巡检额度返回 429 和重试时间');
+  const queuedConnectionTest = await api('POST', '/api/admin/email/test-connection', { id: acc.data.id }, ADMIN);
+  const queuedConnectionResult = await waitInspection(queuedConnectionTest.data.batch_id, ADMIN);
+  ok(queuedConnectionTest.code === 202 && queuedConnectionResult.data.skipped === 1, '单账号连接测试使用同一异步巡检队列');
   ok((await api('GET', '/api/v1/message?email=mine@priest.com&type=claude', null, MEMBER)).data?.code?.includes('magic-link'), '成员可取自己账号的码');
   ok((await api('GET', '/api/v1/message?email=fwd@priest.com&type=claude', null, MEMBER)).code === 403, '成员不能取未分配账号的码(403)');
   ok((await api('POST', '/api/admin/email/delete-batch', { ids: [1] }, MEMBER)).code === 400, '成员删不了别人的账号');

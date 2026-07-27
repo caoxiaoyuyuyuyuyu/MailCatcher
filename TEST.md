@@ -11,12 +11,13 @@ npm test        # 运行 IMAP/网页邮箱单元测试、页面静态测试和�
 覆盖：加密往返 / token hash、登录与双角色(admin/member)、自助注册、forward 转发取码、
 **邮箱接码 + 用户 API Key**、成员权限隔离、管理员升降级(防自锁)、健康状态机、token 轮换、删除外键、
 **类型匹配 `messageMatchesType`（含转发外层发件人被改写、靠正文原始 `From:` 命中的场景）**，
-以及 IMAP 批量巡检的并发上限、实时进度、成功/异常/跳过统计、`fetch_address`、密码脱敏、权限隔离与页面脚本语法。
+以及 IMAP 批量巡检的跨实例全局并发、账号冷却、用户限流、同步批量上限、实时进度、成功/异常/跳过统计、`fetch_address`、密码脱敏、权限隔离与页面脚本语法。
 
 新增 `server/test/webmail-*.test.mjs` 覆盖 Gazeta/Onet 网页邮箱的 HTML 解析、登录错误分类、
 Onet activation 套餐门槛和域名路由；这些测试只使用本地 fixture，不访问真实邮箱。
 
-测试通过环境变量隔离：`MAILCATCHER_DATA_DIR`（临时库）、`FORWARD_171_BASE`（指向内置 mock）。
+测试通过环境变量隔离：`MAILCATCHER_DATA_DIR`（临时库）、`FORWARD_171_BASE`（指向内置 mock）；
+取码和巡检队列使用当前测试进程专属名称，巡检队列专项测试固定使用 Redis DB 13，避免本地服务抢占任务。
 
 ## 启动服务（手动测试）
 
@@ -126,19 +127,28 @@ curl -X POST http://localhost:3000/api/admin/email/rotate-token \
 ### 7. IMAP 批量巡检
 
 ```bash
-# 只巡检指定账号
+# 提交指定账号的异步巡检；必须显式传 ids，每批最多 200 个
 curl -X POST http://localhost:3000/api/admin/email/inspect-imap \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"ids":[1,2]}'
 
-# 巡检当前用户有权查看的全部账号（单次最多 200 个）
-curl -X POST http://localhost:3000/api/admin/email/inspect-imap \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}'
+# 使用上一步返回的 batch_id 查询进度
+curl http://localhost:3000/api/admin/email/inspect-imap/batch/<batch_id> \
+  -H "Authorization: Bearer $TOKEN"
+
+# 单账号连接测试也只接受已保存账号 ID，不接受明文邮箱和密码
+curl -X POST http://localhost:3000/api/admin/email/test-connection \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"id":1}'
 ```
 
-预期：返回 `total/success/failed/skipped/duration_ms/results`。`success` 表示可以登录 IMAP 并打开
+预期：提交接口返回 HTTP/业务码 `202` 和 `batch_id`；查询接口返回
+`state/total/checked/remaining/success/failed/skipped/duration_ms/results`。`success` 表示可以登录 IMAP 并打开
 `INBOX`；错误项不得包含明文密码或数据库密文。`forward`、未配密码和通过 Webmail/API 收件的账号应为
 `skipped`。member 只能得到自己拥有或被分配账号的巡检结果。巡检不发送邮件，也不修改健康状态。
+全局最多 5 个连接（跨进程/实例共享）、默认每分钟启动 30 次、最多积压 250 个任务；同账号在任务
+等待/执行期间持续去重，完成后默认缓存脱敏结果 30 秒。更新 IMAP 地址或密码后应立即执行新版本巡检。
+每用户默认 10 分钟最多 200 次；超过用户额度或全局积压上限返回 `code:429` 和 `retry_after_ms`。
 
 ## CLI 测试
 
@@ -157,7 +167,7 @@ mailcatcher email status 1 banned / email rotate 1
 1. 打开 http://localhost:3000 → 「在线接码」：登录后可"按邮箱"选账号取码；或"按令牌"。
 2. 「管理登录」admin / admin123。
 3. 账号管理：来源(self/forward)切换、独占/共享(shared)切换、状态变更、分配/收回(grant/revoke)、token 轮换、批量导入(self)。
-4. IMAP 巡检：勾选 1–2 个 self 账号后巡检，再清空勾选巡检全部；核对进度条、已检查数和剩余数逐步更新，最终已检查=总计、剩余=0，正常/异常/跳过之和等于总计，失败账号显示脱敏原因，账号健康状态保持不变。
+4. IMAP 巡检：勾选 1–2 个 self 账号后巡检，再清空勾选巡检全部；核对“排队中→检查中→已完成”和进度条，最终已检查=总计、剩余=0，正常/异常/跳过之和等于总计，失败账号显示脱敏原因，账号健康状态保持不变；完成后 30 秒内重复巡检应直接复用结果，修改密码或收件地址后应立即产生新巡检；触发用户限流或全局积压保护时页面提示重试且不把系统繁忙计为账号异常。
 5. 用户管理（admin：升降级角色/重置密码/删除）、个人(API Key/改密)、服务配置、查询日志。
 6. 验证归属：member 登录后只见「在线接码 + 账号管理」，账号页只看到「自己添加 + 被分配给自己」的账号，可对自己的账号增删改/分配，看不到别人的，不能访问用户/日志接口。
 7. 验证共享账号提醒：在线接码页持续展示并发取码风险提示；从邮箱下拉框或账号列表选择共享账号时弹出确认，取消后清空选择；选择独占账号时不弹窗。

@@ -230,6 +230,10 @@ export function getMailboxAccessMode(emailAddress) {
 
 export async function usesImapForAccount(emailAddress) {
   if (getMailboxAccessMode(emailAddress) === 'webmail') return false;
+  const domain = emailAddress.split('@')[1]?.toLowerCase();
+  if (!domain) return false;
+  if (MAILCOM_DOMAINS.has(domain) || domain.endsWith('.mail.com')) return false;
+  if (getKnownServer(domain)) return true;
   return !await isMailcomDomain(emailAddress);
 }
 

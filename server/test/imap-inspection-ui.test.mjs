@@ -14,9 +14,13 @@ test('account page exposes batch IMAP inspection and a result summary', () => {
   assert.match(html, /未选择时巡检全部可见账号/);
   assert.match(html, /<el-progress[^>]+imapInspectionProgress\.percent/);
   assert.match(html, /已检查.*imapInspectionProgress\.checked[\s\S]*剩余.*imapInspectionProgress\.remaining/);
-  assert.match(html, /IMAP_INSPECTION_CLIENT_CONCURRENCY\s*=\s*5/);
-  assert.match(html, /\{\s*ids:\s*\[target\.id\]\s*\}/);
-  assert.match(html, /imapInspectionProgress\.checked\s*=\s*completed/);
+  assert.match(html, /ids:\s*targets\.map\(target\s*=>\s*target\.id\)/);
+  assert.match(html, /submitted\.code\s*!==\s*202/);
+  assert.match(html, /\/api\/admin\/email\/inspect-imap\/batch\//);
+  assert.match(html, /while\s*\(imapInspectionReport\.state\s*!==\s*'completed'\)/);
+  assert.match(html, /imapInspectionProgress\.checked\s*=\s*imapInspectionReport\.checked/);
+  assert.match(html, /排队中[\s\S]*检查中[\s\S]*已完成/);
+  assert.doesNotMatch(html, /IMAP_INSPECTION_CLIENT_CONCURRENCY/);
 });
 
 test('inline application script remains valid JavaScript', () => {

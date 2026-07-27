@@ -90,7 +90,7 @@ MailCatcher 已从「纯接码工具」演进为「**多租户账号管理 + 统
 - **账号来源(source)**:
   - `self` — 自管邮箱，本地 IMAP/mailcom 取码（密码 AES-GCM 加密存）；可设 `fetch_address`(实际收件邮箱)与展示 `address` 分离——如 Codex 用 Outlook 订阅(展示)、验证码转发到公司 mail.com(收件)，取码时按转发邮件正文里的 `To:<原 Outlook>` 过滤区分
   - `forward` — 171mail 账号，转发到 `b.171mail.com/api/v1/message`（上游 token 加密存）
-- **IMAP 批量巡检**: 登录用户可巡检有权查看的指定或全部账号（最多 200 个）；前端保持最多 5 个逐账号请求并实时显示已检查/剩余数量，后端验证 IMAP 登录与 `INBOX` 访问，统计正常/异常/跳过，错误脱敏且不自动修改健康状态。非 IMAP 收件路径标记为跳过
+- **IMAP 批量巡检**: 登录用户可在页面巡检有权查看的指定或全部账号（页面最多 200 个）；前端保持最多 5 个逐账号请求并实时显示已检查/剩余数量，同步 API 每次显式接收 1–5 个 ID。任务通过 BullMQ 跨实例限制全局并发，并有同账号冷却和单用户额度；后端验证 IMAP 登录与 `INBOX` 访问，统计正常/异常/跳过，错误脱敏且不自动修改健康状态。非 IMAP 收件路径标记为跳过
 - **App Key（外部系统接入）**: 管理员可创建 App Key（`ak_xxx` + `sk_xxx`），外部系统通过 `Authorization: Bearer ak:sk` 调用 API 接码。每个 App Key 可配账号范围、状态(active/disabled)，支持轮换。`app_keys` 表存 hash，明文仅创建/轮换时返回一次
 - **统一接码**: `GET /api/v1/message?token=&type=` 同步取码（兼容）；`POST /api/v1/message/async` 异步取码返回 `taskId`，`GET /api/v1/message/task/:taskId` 轮询结果。所有取码通过 BullMQ + Redis 队列处理，支持高并发和 worker 水平扩展
 - **状态系统**: 健康轴 `health_status`(active/error/banned/expired/disabled) + 归属/分配轴(`created_by` + `account_grants`)，
@@ -104,7 +104,7 @@ MailCatcher 已从「纯接码工具」演进为「**多租户账号管理 + 统
 
 - `cli/mailcatcher` — CLI 工具（全局 `/usr/local/bin/mailcatcher`）
 - `server/src/services/imap.js` — IMAP 连接和验证码提取核心（self 账号）
-- `server/src/services/imapInspection.js` — IMAP 批量巡检（限并发、汇总、错误脱敏）
+- `server/src/services/imapInspection.js` / `imapInspectionQueue.js` — IMAP 巡检、BullMQ 跨实例全局并发、账号冷却、用户限流、汇总与错误脱敏
 - `server/src/services/mailcom.js` — mail.com Web API 抓取（self 账号）
 - `server/src/services/webmailBrowser.js` — Chromium 会话、通用网页邮箱 HTML/链接解析与安全错误
 - `server/src/services/gazeta.js` / `server/src/services/onet.js` — Gazeta/Onet 网页登录与收件箱适配器
@@ -146,10 +146,11 @@ mailcatcher log list / clear            # 日志管理
 - **环境变量**：生产必须设置 `ENCRYPTION_KEY`（加密 IMAP 密码/171mail token）与 `JWT_SECRET`；缺省会告警
 - **账号来源**：`source=self` 走本地 IMAP/mailcom；Onet 默认使用 `imap.poczta.onet.pl:993`（SSL）；`source=forward` 转发到 171mail（密文存上游 token）
 - **Gazeta/Onet self**：`@gazeta.pl` 走 Chromium 网页邮箱；`@onet.pl` 默认走官方 IMAP，可用 `ONET_ACCESS_MODE=webmail` 强制网页模式。Onet 必须先在官方页面完成服务启用；网页模式遇到验证码挑战/二步验证返回 challenge 错误，不自动绕过
-- **IMAP 巡检口径**：`POST /api/admin/email/inspect-imap` 只验证 IMAP 登录并打开 `INBOX`，不发探测邮件、不自动改 `health_status`；默认并发 5、单账号超时 20 秒，单批最多 200 个
+- **IMAP 巡检口径**：`POST /api/admin/email/inspect-imap` 提交最多 200 个显式 ID 的异步批次，`GET /api/admin/email/inspect-imap/batch/:batchId` 查询进度；只验证 IMAP 登录并打开 `INBOX`，不发探测邮件、不自动改 `health_status`；默认跨实例全局并发 5、每分钟启动 30 次、最多积压 250 个任务、单账号超时 20 秒
 - **方案乙**：所有账号对外都用我方签发的 token（库内存 hash，创建/轮换时明文仅显示一次）
 - **默认管理员**：admin / admin123，角色 `admin`（旧库 super_admin/team_admin 启动时自动迁移为 admin）
 - **自助注册**：`POST /api/admin/register`（公开），邮箱须 `@apexin.ai` 后缀 + 密码二次确认（≥6 位）；注册即 `member`，登录后由管理员在用户管理升级为 admin。邮箱登录大小写不敏感
 - **前端导航按角色显隐**：member 只见「在线接码 + 账号管理」（登录落地账号管理）；admin 另见控制台/用户管理/App Key/服务配置/查询日志/个人。账号页：任何人都能加账号/导入/删自己的；每行按 `can_manage` 显示编辑/状态/分配/删除按钮；「分配」弹窗按 `/api/admin/user/options` 选用户，调 `grant`/`revoke`
 - **Codex 登录触发**：`POST /api/v1/codex/send`（需登录）用无头浏览器在 chatgpt.com 提交邮箱 → OpenAI 给该邮箱发「临时登录代码」（纯邮箱 OTP、无需密码、实测未遇验证码拦截）；再配合 self+`fetch_address` 转发收件箱把码取回。前端「在线接码」邮箱模式有「发送 Codex 登录码并自动取码」一键按钮。⚠ 依赖 OpenAI 登录页结构，可能随其改版/加强风控而失效
-- **可配置**：`MAILCATCHER_DATA_DIR`（DB 目录）、`FORWARD_171_BASE`（171mail 地址，测试用）、`REGISTER_EMAIL_SUFFIX`（注册邮箱后缀，默认 `@apexin.ai`）、`DB_BACKEND`（`sqlite` 或 `postgres`）、`DATABASE_URL`（PostgreSQL 连接串）、`REDIS_URL`（Redis 地址，默认 `redis://127.0.0.1:6379`）、`FETCH_CONCURRENCY`（Worker 并发数，默认 20）、`FETCH_LOOKBACK_MINUTES`（取码回溯时间窗，默认 30）、`MAILCOM_SCAN_LIMIT`（mail.com 每次扫描邮件数，默认 15）、`CHROME_PATH`（网页邮箱 Chromium 路径，默认 `/usr/bin/google-chrome`）、`WEBMAIL_SCAN_LIMIT`（Gazeta/Onet 每次扫描邮件数，默认 15）、`ONET_ACCESS_MODE=webmail`（可选，强制 Onet 网页模式）、`IMAP_INSPECTION_CONCURRENCY`（巡检并发，默认 5、最高 10）、`IMAP_INSPECTION_TIMEOUT_MS`（单账号超时毫秒数，默认 20000）
+- **IMAP 巡检运行边界**：页面最多加载 200 个可见账号并拆成单账号请求；同步接口每次必须显式传 1–5 个 ID。巡检任务进入 BullMQ，`setGlobalConcurrency` 在所有应用实例间限制总连接数；队列 deduplication 为同账号提供冷却，Redis 原子计数限制单用户频率。巡检不修改账号健康状态
+- **可配置**：`MAILCATCHER_DATA_DIR`（DB 目录）、`FORWARD_171_BASE`（171mail 地址，测试用）、`REGISTER_EMAIL_SUFFIX`（注册邮箱后缀，默认 `@apexin.ai`）、`DB_BACKEND`（`sqlite` 或 `postgres`）、`DATABASE_URL`（PostgreSQL 连接串）、`REDIS_URL`（Redis 地址，默认 `redis://127.0.0.1:6379`）、`FETCH_CONCURRENCY`（Worker 并发数，默认 20）、`FETCH_LOOKBACK_MINUTES`（取码回溯时间窗，默认 30）、`MAILCOM_SCAN_LIMIT`（mail.com 每次扫描邮件数，默认 15）、`CHROME_PATH`（网页邮箱 Chromium 路径，默认 `/usr/bin/google-chrome`）、`WEBMAIL_SCAN_LIMIT`（Gazeta/Onet 每次扫描邮件数，默认 15）、`ONET_ACCESS_MODE=webmail`（可选，强制 Onet 网页模式）、`IMAP_INSPECTION_GLOBAL_CONCURRENCY`（巡检跨实例全局并发，默认 5、最高 10）、`IMAP_INSPECTION_GLOBAL_RATE_LIMIT` / `IMAP_INSPECTION_GLOBAL_RATE_WINDOW_MS`（全局启动速率，默认 30/分钟）、`IMAP_INSPECTION_MAX_PENDING`（全局积压上限，默认 250）、`IMAP_INSPECTION_ACCOUNT_COOLDOWN_MS`（任务完成后结果冷却，默认 30000）、`IMAP_INSPECTION_USER_LIMIT` / `IMAP_INSPECTION_USER_WINDOW_MS`（每用户默认 10 分钟 200 次）、`IMAP_INSPECTION_TIMEOUT_MS`（单账号连接超时，默认 20000）、`IMAP_INSPECTION_BATCH_TTL_MS`（批次结果保留，默认 30 分钟）

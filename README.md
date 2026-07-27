@@ -107,7 +107,7 @@ mailcatcher user list / server list / log list / stats
 4. **巡检**：账号管理 →「批量巡检 IMAP」。勾选时只巡检所选账号；不勾选时巡检当前用户有权查看的全部账号（单次最多 200 个）。
 5. **接码**：网页登录后「在线接码」按邮箱选账号取码；或脚本用令牌/API Key 取码。
 
-> 巡检会使用已加密保存的收件凭据登录 IMAP 并打开 `INBOX`，以最多 5 个账号并发执行，并实时显示“已检查 / 总数 / 剩余数”。它可发现服务器配置、授权码/密码或收件箱访问异常，但不会主动发送测试邮件，因此不等同于端到端投递测试；结果也不会自动修改账号健康状态。`forward`、mail.com Web API、Gazeta/Onet Webmail 等非 IMAP 路径会标记为“跳过”。
+> 巡检会使用已加密保存的收件凭据登录 IMAP 并打开 `INBOX`。页面一次提交异步批次，再轮询“已检查 / 总数 / 剩余数”；BullMQ 在所有服务实例间统一限制并发和启动速率。等待排队不会被误判为账号异常，同一账号的完成结果默认冷却 30 秒，更新 IMAP 地址或密码后会立即检查新配置。巡检不会主动发送测试邮件，也不会自动修改账号健康状态；`forward`、mail.com Web API、Gazeta/Onet Webmail 等非 IMAP 路径会标记为“跳过”。
 
 ## API 文档
 
@@ -151,7 +151,9 @@ mailcatcher user list / server list / log list / stats
 | GET | `/api/admin/user/options` | 用户下拉(id+名)，供分配用 |
 | POST | `/api/admin/email/rotate-token` | 轮换查询令牌 |
 | POST | `/api/admin/email/import` | 批量导入（self） |
-| POST | `/api/admin/email/inspect-imap` | 批量巡检 IMAP；body 可传 `{"ids":[1,2]}`，不传 ids 时巡检全部有权查看的账号（最多 200 个） |
+| POST | `/api/admin/email/inspect-imap` | 提交异步 IMAP 巡检；必须传 `{"ids":[1,2]}`，每批最多 200 个，返回 `202` 和 `batch_id` |
+| GET | `/api/admin/email/inspect-imap/batch/:batchId` | 查询本人巡检批次进度和脱敏结果；admin 可查看其他批次 |
+| POST | `/api/admin/email/test-connection` | 测试一个已保存账号，参数为 `{"id":1}`，同样进入巡检队列；不接受明文邮箱密码 |
 | DELETE | `/api/admin/email/delete/:id` | 删除 |
 | GET | `/api/admin/logs/email` | 查询日志（仅 admin） |
 | GET | `/api/admin/stats` | 统计 |
@@ -174,7 +176,8 @@ server/src/
 ├── routes/                     # auth / users / emails(账号) / mailServers / message / logs / claude
 └── services/
     ├── imap.js                 # 本地 IMAP/mailcom 取码（self）
-    ├── imapInspection.js       # IMAP 限并发批量巡检、统计与错误脱敏
+    ├── imapInspection.js       # 单批 IMAP 巡检、统计与错误脱敏
+    ├── imapInspectionQueue.js  # BullMQ 异步批次、跨实例并发/速率、积压保护、账号冷却与用户限流
     ├── mailcom.js              # mail.com Web API
     ├── forward171.js           # 171mail 转发适配器（forward）
     └── crypto.js               # AES-256-GCM 加解密 + token hash
@@ -184,7 +187,7 @@ server/public/index.html        # 完整前端 UI
 
 ## 注意事项
 
-- **环境变量**: 生产必须设置 `ENCRYPTION_KEY`、`JWT_SECRET`；可选 `MAILCATCHER_DATA_DIR`、`FORWARD_171_BASE`、`CHROME_PATH`、`WEBMAIL_SCAN_LIMIT`、`ONET_ACCESS_MODE=webmail`、`IMAP_INSPECTION_CONCURRENCY`（巡检并发，默认 5、最高 10）、`IMAP_INSPECTION_TIMEOUT_MS`（单账号超时，默认 20000）
+- **环境变量**: 生产必须设置 `ENCRYPTION_KEY`、`JWT_SECRET`；可选 `MAILCATCHER_DATA_DIR`、`FORWARD_171_BASE`、`CHROME_PATH`、`WEBMAIL_SCAN_LIMIT`、`ONET_ACCESS_MODE=webmail`、`IMAP_INSPECTION_GLOBAL_CONCURRENCY`（跨实例全局并发，默认 5、最高 10）、`IMAP_INSPECTION_GLOBAL_RATE_LIMIT` / `IMAP_INSPECTION_GLOBAL_RATE_WINDOW_MS`（全局默认每分钟启动 30 次）、`IMAP_INSPECTION_MAX_PENDING`（全局最大等待/执行任务，默认 250）、`IMAP_INSPECTION_ACCOUNT_COOLDOWN_MS`（任务完成后的同账号结果冷却，默认 30000）、`IMAP_INSPECTION_USER_LIMIT` / `IMAP_INSPECTION_USER_WINDOW_MS`（每用户默认 10 分钟 200 次）、`IMAP_INSPECTION_TIMEOUT_MS`（单账号连接超时，默认 20000）、`IMAP_INSPECTION_BATCH_TTL_MS`（批次结果保留，默认 30 分钟）
 - **令牌一次性**: 查询令牌 / API Key 创建或轮换时明文仅显示一次，库内只存 hash
 - **应用专用密码**: Gmail/Outlook 等 self 账号需使用应用专用密码
 - **30 分钟窗口**: 本地 IMAP 默认只查询最近 30 分钟邮件，可用 `FETCH_LOOKBACK_MINUTES` 调整

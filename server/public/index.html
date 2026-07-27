@@ -479,7 +479,10 @@
     <div>
       <div v-if="imapInspectionReport.total > 0" style="margin-bottom:16px">
         <div style="display:flex;justify-content:space-between;margin-bottom:8px;font-size:14px;color:#606266">
-          <span>已检查 {{ imapInspectionProgress.checked }} / {{ imapInspectionReport.total }}</span>
+          <span>
+            已检查 {{ imapInspectionProgress.checked }} / {{ imapInspectionReport.total }}
+            · {{ imapInspectionReport.state==='queued'?'排队中':(imapInspectionReport.state==='running'?'检查中':'已完成') }}
+          </span>
           <span>剩余 {{ imapInspectionProgress.remaining }}</span>
         </div>
         <el-progress :percentage="imapInspectionProgress.percent" :stroke-width="12"
@@ -689,9 +692,8 @@ createApp({
     const accSearch = ref(''), accSourceFilter = ref(''), accHealthFilter = ref('');
     const selectedAccounts = ref([]);
     const imapInspectionDialog = ref(false), imapInspectionLoading = ref(false);
-    const imapInspectionReport = reactive({ total: 0, success: 0, failed: 0, skipped: 0, duration_ms: 0, results: [] });
+    const imapInspectionReport = reactive({ batch_id: '', state: 'completed', total: 0, checked: 0, remaining: 0, success: 0, failed: 0, skipped: 0, duration_ms: 0, results: [] });
     const imapInspectionProgress = reactive({ checked: 0, remaining: 0, percent: 0 });
-    const IMAP_INSPECTION_CLIENT_CONCURRENCY = 5;
     const accDialog = ref(false), accSaving = ref(false);
     const accForm = reactive({ id: null, source: 'self', address: '', password: '', appkey: '', fetch_address: '', forward_provider: '171mail', forward_token: '', shared: 0, purchaser: '', invoiced: 0, status: 1 });
     let accountsLoaded = false;
@@ -790,28 +792,24 @@ createApp({
       if (Number(r.data.total) > 200) throw new Error('可巡检账号超过 200 个，请勾选后分批巡检');
       return r.data.list || [];
     }
-    function failedInspectionResult(target, error, status = 'failed') {
-      return {
-        id: target.id,
-        address: target.address,
-        mailbox: target.fetch_address || target.address,
-        status,
-        error,
-        duration_ms: 0,
-      };
-    }
-    function updateImapInspectionProgress(results, completed, startedAt) {
-      const done = results.filter(Boolean);
-      imapInspectionReport.results = [...done];
-      imapInspectionReport.success = done.filter(result => result.status === 'success').length;
-      imapInspectionReport.failed = done.filter(result => result.status === 'failed').length;
-      imapInspectionReport.skipped = done.filter(result => result.status === 'skipped').length;
-      imapInspectionReport.duration_ms = Math.max(0, Date.now() - startedAt);
-      imapInspectionProgress.checked = completed;
-      imapInspectionProgress.remaining = Math.max(0, imapInspectionReport.total - completed);
+    function applyImapInspectionReport(report) {
+      Object.assign(imapInspectionReport, {
+        batch_id: report.batch_id || imapInspectionReport.batch_id,
+        state: report.state || 'queued',
+        total: Number(report.total || 0),
+        checked: Number(report.checked || 0),
+        remaining: Number(report.remaining || 0),
+        success: Number(report.success || 0),
+        failed: Number(report.failed || 0),
+        skipped: Number(report.skipped || 0),
+        duration_ms: Number(report.duration_ms || 0),
+        results: Array.isArray(report.results) ? report.results : [],
+      });
+      imapInspectionProgress.checked = imapInspectionReport.checked;
+      imapInspectionProgress.remaining = imapInspectionReport.remaining;
       imapInspectionProgress.percent = imapInspectionReport.total
-        ? Math.round((completed / imapInspectionReport.total) * 100)
-        : 0;
+        ? Math.round((imapInspectionReport.checked / imapInspectionReport.total) * 100)
+        : 100;
     }
     async function inspectImapAccounts() {
       const selected = [...selectedAccounts.value];
@@ -831,13 +829,12 @@ createApp({
       imapInspectionLoading.value = true;
       try {
         const targets = await loadImapInspectionTargets(selected);
-        const startedAt = Date.now();
-        const results = new Array(targets.length);
-        let nextIndex = 0;
-        let completed = 0;
-
         Object.assign(imapInspectionReport, {
+          batch_id: '',
+          state: 'queued',
           total: targets.length,
+          checked: 0,
+          remaining: targets.length,
           success: 0,
           failed: 0,
           skipped: 0,
@@ -846,35 +843,37 @@ createApp({
         });
         Object.assign(imapInspectionProgress, { checked: 0, remaining: targets.length, percent: 0 });
         imapInspectionDialog.value = true;
-
-        async function worker() {
-          while (nextIndex < targets.length) {
-            const index = nextIndex;
-            nextIndex += 1;
-            const target = targets[index];
-            try {
-              const r = await api('POST', '/api/admin/email/inspect-imap', { ids: [target.id] });
-              if (r.code === 200 && r.data.results?.[0]) {
-                results[index] = r.data.results[0];
-              } else if (r.code === 200) {
-                results[index] = failedInspectionResult(target, '账号不存在或权限已变更', 'skipped');
-              } else {
-                results[index] = failedInspectionResult(target, r.message || 'IMAP 巡检失败');
-              }
-            } catch (error) {
-              results[index] = failedInspectionResult(target, error.message || 'IMAP 巡检失败');
-            }
-            completed += 1;
-            updateImapInspectionProgress(results, completed, startedAt);
-          }
+        if (!targets.length) {
+          applyImapInspectionReport({
+            state: 'completed', total: 0, checked: 0, remaining: 0,
+            success: 0, failed: 0, skipped: 0, duration_ms: 0, results: [],
+          });
+          ElMessage.info('没有可巡检的账号');
+          return;
         }
 
-        await Promise.all(Array.from(
-          { length: Math.min(IMAP_INSPECTION_CLIENT_CONCURRENCY, targets.length) },
-          () => worker(),
-        ));
+        const submitted = await api('POST', '/api/admin/email/inspect-imap', {
+          ids: targets.map(target => target.id),
+        });
+        if (submitted.code !== 202 || !submitted.data?.batch_id) {
+          throw new Error(submitted.message || '无法提交 IMAP 巡检');
+        }
+        applyImapInspectionReport(submitted.data);
 
-        if (imapInspectionReport.failed > 0) ElMessage.warning(`巡检完成，发现 ${imapInspectionReport.failed} 个异常账号`);
+        while (imapInspectionReport.state !== 'completed') {
+          await new Promise(resolve => setTimeout(resolve, 800));
+          const progress = await api(
+            'GET',
+            `/api/admin/email/inspect-imap/batch/${encodeURIComponent(imapInspectionReport.batch_id)}`,
+          );
+          if (progress.code !== 200) {
+            throw new Error(progress.message || '无法读取 IMAP 巡检进度');
+          }
+          applyImapInspectionReport(progress.data);
+        }
+
+        if (imapInspectionReport.total === 0) ElMessage.info('没有可巡检的账号');
+        else if (imapInspectionReport.failed > 0) ElMessage.warning(`巡检完成，发现 ${imapInspectionReport.failed} 个异常账号`);
         else ElMessage.success('IMAP 巡检完成');
       } catch (error) {
         imapInspectionDialog.value = false;
