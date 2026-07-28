@@ -185,9 +185,11 @@
         <el-table-column label="类型" width="80" align="center">
           <template #default="{row}"><el-tag size="small" :type="row.shared?'success':'info'">{{ row.shared?'共享':'独占' }}</el-tag></template>
         </el-table-column>
-        <el-table-column label="令牌" width="140">
+        <el-table-column label="令牌" width="190">
           <template #default="{row}">
             <span class="hint">{{ row.token_prefix || '—' }}</span>
+            <el-button link size="small" type="primary" :loading="row.token_copying"
+              :disabled="row.token_copying" @click="copyAccountToken(row)">复制</el-button>
             <el-button v-if="row.can_manage" link size="small" @click="rotateToken(row)">轮换</el-button>
           </template>
         </el-table-column>
@@ -661,7 +663,16 @@ createApp({
       page.value = 'code';
       await confirmSharedAccountUsage(row.address, row);
     }
-    function copyText(t) { navigator.clipboard.writeText(t); ElMessage.success('已复制'); }
+    async function copyText(t) {
+      try {
+        await navigator.clipboard.writeText(t);
+        ElMessage.success('已复制');
+        return true;
+      } catch {
+        ElMessage.error('自动复制失败，请手动复制');
+        return false;
+      }
+    }
 
     // Codex 一键：触发 OpenAI 发码 → 轮询取码
     const codexLoading = ref(false);
@@ -882,6 +893,26 @@ createApp({
         imapInspectionLoading.value = false;
       }
     }
+    async function copyAccountToken(row) {
+      if (row.token_copying) return;
+      row.token_copying = true;
+      try {
+        const r = await api('POST', '/api/admin/email/reveal-token', { id: row.id });
+        if (r.code === 200 && r.data?.token) {
+          if (!await copyText(r.data.token)) {
+            showSecret('账号查询令牌（请手动复制）', r.data.token);
+          }
+        } else if (r.code === 409) {
+          ElMessage.warning(r.message);
+        } else {
+          ElMessage.error(r.message || '复制失败');
+        }
+      } catch (error) {
+        ElMessage.error('复制失败: ' + error.message);
+      } finally {
+        row.token_copying = false;
+      }
+    }
     async function rotateToken(row) {
       if (!await confirmDanger('轮换后旧令牌立即失效，确定？', '轮换令牌', '轮换')) return;
       const r = await api('POST', '/api/admin/email/rotate-token', { id: row.id });
@@ -907,7 +938,15 @@ createApp({
       if (ok(await api('POST', '/api/admin/email/grant', { id: assignAcc.id, user_id: assignUserId.value }), '已分配')) { assignUserId.value = null; refreshAssign(); }
     }
     async function doRevoke(userId) {
-      if (ok(await api('POST', '/api/admin/email/revoke', { id: assignAcc.id, user_id: userId }), '已收回')) refreshAssign();
+      if (!await confirmDanger(
+        '收回后该成员将无法继续通过账号访问，但其可能已经复制过查询令牌。系统不会自动轮换；如需彻底撤销，请随后轮换该账号令牌。',
+        '收回账号分配',
+        '确认收回',
+      )) return;
+      if (ok(await api('POST', '/api/admin/email/revoke', { id: assignAcc.id, user_id: userId }), '已收回')) {
+        ElMessage.warning('如该成员可能已复制令牌，请轮换此账号令牌');
+        refreshAssign();
+      }
     }
 
     const statusDialog = ref(false);
@@ -937,19 +976,41 @@ createApp({
     const userList = ref([]), userSearch = ref('');
     async function loadUsers() { const r = await api('GET', '/api/admin/user/list?keyword=' + encodeURIComponent(userSearch.value)); if (r.code === 200) userList.value = r.data.list; }
     const userDialog = ref(false);
-    const userForm = reactive({ id: null, username: '', role: 'member', status: 1 });
-    function editUser(row) { Object.assign(userForm, { id: row.id, username: row.username, role: row.role, status: row.status }); userDialog.value = true; }
+    const userForm = reactive({ id: null, username: '', role: 'member', status: 1, original_status: 1 });
+    function editUser(row) {
+      Object.assign(userForm, {
+        id: row.id,
+        username: row.username,
+        role: row.role,
+        status: row.status,
+        original_status: row.status,
+      });
+      userDialog.value = true;
+    }
     async function saveUser() {
       const r = await api('PUT', '/api/admin/user/update', { id: userForm.id, role: userForm.role, status: userForm.status });
-      if (ok(r, '保存成功')) { userDialog.value = false; loadUsers(); }
+      if (ok(r, '保存成功')) {
+        if (userForm.original_status !== 0 && userForm.status === 0) {
+          ElMessage.warning('该成员可能已复制账号令牌；如需彻底撤销，请轮换曾分配给他的相关账号令牌');
+        }
+        userDialog.value = false;
+        loadUsers();
+      }
     }
     async function resetUserPwd(row) {
       const { value } = await ElMessageBox.prompt('输入新密码', '重置密码 - ' + row.username, { inputType: 'password' });
       if (ok(await api('POST', '/api/admin/user/reset-password', { id: row.id, newPassword: value }), '已重置')) {}
     }
     async function deleteUser(id) {
-      if (!await confirmDanger('确定删除该用户？', '删除用户', '删除')) return;
-      if (ok(await api('DELETE', '/api/admin/user/delete/' + id))) loadUsers();
+      if (!await confirmDanger(
+        '删除后用户登录权限立即失效，但其可能已经复制过账号查询令牌。系统不会自动轮换；如需彻底撤销，请轮换曾分配给他的相关账号令牌。',
+        '删除用户',
+        '确认删除',
+      )) return;
+      if (ok(await api('DELETE', '/api/admin/user/delete/' + id))) {
+        ElMessage.warning('如该成员可能已复制令牌，请轮换相关账号令牌');
+        loadUsers();
+      }
     }
 
     // ── Profile ──
@@ -1062,7 +1123,7 @@ createApp({
       codexLoading, codexLoginAndFetch,
       stats,
       accountList, accTotal, accPage, accSearch, accSourceFilter, accHealthFilter, selectedAccounts, loadAccounts,
-      accDialog, accSaving, accForm, showAddAccount, editAccount, saveAccount, deleteAccount, deleteSelectedAccounts, rotateToken,
+      accDialog, accSaving, accForm, showAddAccount, editAccount, saveAccount, deleteAccount, deleteSelectedAccounts, copyAccountToken, rotateToken,
       imapInspectionDialog, imapInspectionLoading, imapInspectionReport, imapInspectionProgress, inspectImapAccounts,
       assignDialog, userOptions, assignUserId, assignAcc, showAssign, doGrant, doRevoke,
       statusDialog, statusForm, showStatus, saveStatus,

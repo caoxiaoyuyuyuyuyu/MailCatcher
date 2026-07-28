@@ -68,7 +68,10 @@ router.delete('/delete/:id', async (req, res) => {
   const id = Number(req.params.id);
   if (id === req.user.id) return res.json({ code: 400, message: '不能删除自己' });
   if (!await db('users').where('id', id).first()) return res.json({ code: 404, message: '用户不存在' });
-  await db('users').where('id', id).del();
+  await db.transaction(async trx => {
+    await trx('account_grants').where('user_id', id).del();
+    await trx('users').where('id', id).del();
+  });
   res.json({ code: 200, message: 'success' });
 });
 
