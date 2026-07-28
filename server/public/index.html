@@ -938,7 +938,15 @@ createApp({
       if (ok(await api('POST', '/api/admin/email/grant', { id: assignAcc.id, user_id: assignUserId.value }), '已分配')) { assignUserId.value = null; refreshAssign(); }
     }
     async function doRevoke(userId) {
-      if (ok(await api('POST', '/api/admin/email/revoke', { id: assignAcc.id, user_id: userId }), '已收回')) refreshAssign();
+      if (!await confirmDanger(
+        '收回后该成员将无法继续通过账号访问，但其可能已经复制过查询令牌。系统不会自动轮换；如需彻底撤销，请随后轮换该账号令牌。',
+        '收回账号分配',
+        '确认收回',
+      )) return;
+      if (ok(await api('POST', '/api/admin/email/revoke', { id: assignAcc.id, user_id: userId }), '已收回')) {
+        ElMessage.warning('如该成员可能已复制令牌，请轮换此账号令牌');
+        refreshAssign();
+      }
     }
 
     const statusDialog = ref(false);
@@ -968,19 +976,41 @@ createApp({
     const userList = ref([]), userSearch = ref('');
     async function loadUsers() { const r = await api('GET', '/api/admin/user/list?keyword=' + encodeURIComponent(userSearch.value)); if (r.code === 200) userList.value = r.data.list; }
     const userDialog = ref(false);
-    const userForm = reactive({ id: null, username: '', role: 'member', status: 1 });
-    function editUser(row) { Object.assign(userForm, { id: row.id, username: row.username, role: row.role, status: row.status }); userDialog.value = true; }
+    const userForm = reactive({ id: null, username: '', role: 'member', status: 1, original_status: 1 });
+    function editUser(row) {
+      Object.assign(userForm, {
+        id: row.id,
+        username: row.username,
+        role: row.role,
+        status: row.status,
+        original_status: row.status,
+      });
+      userDialog.value = true;
+    }
     async function saveUser() {
       const r = await api('PUT', '/api/admin/user/update', { id: userForm.id, role: userForm.role, status: userForm.status });
-      if (ok(r, '保存成功')) { userDialog.value = false; loadUsers(); }
+      if (ok(r, '保存成功')) {
+        if (userForm.original_status !== 0 && userForm.status === 0) {
+          ElMessage.warning('该成员可能已复制账号令牌；如需彻底撤销，请轮换曾分配给他的相关账号令牌');
+        }
+        userDialog.value = false;
+        loadUsers();
+      }
     }
     async function resetUserPwd(row) {
       const { value } = await ElMessageBox.prompt('输入新密码', '重置密码 - ' + row.username, { inputType: 'password' });
       if (ok(await api('POST', '/api/admin/user/reset-password', { id: row.id, newPassword: value }), '已重置')) {}
     }
     async function deleteUser(id) {
-      if (!await confirmDanger('确定删除该用户？', '删除用户', '删除')) return;
-      if (ok(await api('DELETE', '/api/admin/user/delete/' + id))) loadUsers();
+      if (!await confirmDanger(
+        '删除后用户登录权限立即失效，但其可能已经复制过账号查询令牌。系统不会自动轮换；如需彻底撤销，请轮换曾分配给他的相关账号令牌。',
+        '删除用户',
+        '确认删除',
+      )) return;
+      if (ok(await api('DELETE', '/api/admin/user/delete/' + id))) {
+        ElMessage.warning('如该成员可能已复制令牌，请轮换相关账号令牌');
+        loadUsers();
+      }
     }
 
     // ── Profile ──

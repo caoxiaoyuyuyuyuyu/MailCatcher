@@ -190,6 +190,7 @@ server/public/index.html        # 完整前端 UI
 
 - **环境变量**: 生产必须设置 `ENCRYPTION_KEY`、`JWT_SECRET`；可选 `MAILCATCHER_DATA_DIR`、`FORWARD_171_BASE`、`CHROME_PATH`、`WEBMAIL_SCAN_LIMIT`、`ONET_ACCESS_MODE=webmail`、`IMAP_INSPECTION_GLOBAL_CONCURRENCY`（跨实例全局并发，默认 5、最高 10）、`IMAP_INSPECTION_GLOBAL_RATE_LIMIT` / `IMAP_INSPECTION_GLOBAL_RATE_WINDOW_MS`（全局默认每分钟启动 30 次）、`IMAP_INSPECTION_MAX_PENDING`（全局最大等待/执行任务，默认 250）、`IMAP_INSPECTION_ACCOUNT_COOLDOWN_MS`（任务完成后的同账号结果冷却，默认 30000）、`IMAP_INSPECTION_USER_LIMIT` / `IMAP_INSPECTION_USER_WINDOW_MS`（每用户默认 10 分钟 200 次）、`IMAP_INSPECTION_TIMEOUT_MS`（单账号连接超时，默认 20000）、`IMAP_INSPECTION_BATCH_TTL_MS`（批次结果保留，默认 30 分钟）
 - **查询令牌复制**: 查询令牌在库内同时保存 hash 与 AES-GCM 加密副本；admin、归属人及被分配用户可以复制。无法安全迁移的旧账号需先轮换
+- **撤权后的令牌**: 收回分配、停用或删除成员会立即撤销其网页登录权限，但不会自动轮换其可能已经复制的账号令牌；前端会提示管理员按需轮换相关账号
 - **API Key 一次性**: 个人 API Key / App Key 创建或轮换时明文仅显示一次，库内只存 hash
 - **应用专用密码**: Gmail/Outlook 等 self 账号需使用应用专用密码
 - **30 分钟窗口**: 本地 IMAP 默认只查询最近 30 分钟邮件，可用 `FETCH_LOOKBACK_MINUTES` 调整

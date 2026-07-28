@@ -18,6 +18,13 @@ test('token copy uses the authenticated reveal endpoint', () => {
   );
 });
 
+test('revoking access warns that copied tokens require manual rotation', () => {
+  assert.match(html, /收回后该成员将无法继续通过账号访问/);
+  assert.match(html, /系统不会自动轮换/);
+  assert.match(html, /删除后用户登录权限立即失效/);
+  assert.match(html, /该成员可能已复制账号令牌/);
+});
+
 test('inline Vue script remains syntactically valid', () => {
   const start = html.indexOf('<script>') + '<script>'.length;
   const end = html.indexOf('</script>', start);

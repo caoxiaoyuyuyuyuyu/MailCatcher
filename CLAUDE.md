@@ -148,6 +148,7 @@ mailcatcher log list / clear            # 日志管理
 - **Gazeta/Onet self**：`@gazeta.pl` 走 Chromium 网页邮箱；`@onet.pl` 默认走官方 IMAP，可用 `ONET_ACCESS_MODE=webmail` 强制网页模式。Onet 必须先在官方页面完成服务启用；网页模式遇到验证码挑战/二步验证返回 challenge 错误，不自动绕过
 - **IMAP 巡检口径**：`POST /api/admin/email/inspect-imap` 提交最多 200 个显式 ID 的异步批次，`GET /api/admin/email/inspect-imap/batch/:batchId` 查询进度；只验证 IMAP 登录并打开 `INBOX`，不发探测邮件、不自动改 `health_status`；默认跨实例全局并发 5、每分钟启动 30 次、最多积压 250 个任务、单账号超时 20 秒
 - **账号查询 token**：所有账号对外都用我方签发的 token；库内存 hash 用于校验、AES-GCM 加密副本用于授权复制。admin/owner/被分配用户可复制；旧库明文 token 经 hash 校验后迁移并清除遗留明文，无法验证的账号需先轮换
+- **撤权提示**：收回账号分配、停用或删除成员会立即撤销其 JWT 权限，但不自动轮换已复制的账号 token；前端明确提示管理员按需轮换相关账号
 - **默认管理员**：admin / admin123，角色 `admin`（旧库 super_admin/team_admin 启动时自动迁移为 admin）
 - **自助注册**：`POST /api/admin/register`（公开），邮箱须 `@apexin.ai` 后缀 + 密码二次确认（≥6 位）；注册即 `member`，登录后由管理员在用户管理升级为 admin。邮箱登录大小写不敏感
 - **前端导航按角色显隐**：member 只见「在线接码 + 账号管理」（登录落地账号管理）；admin 另见控制台/用户管理/App Key/服务配置/查询日志/个人。账号页：任何人都能加账号/导入/删自己的；每行按 `can_manage` 显示编辑/状态/分配/删除按钮；「分配」弹窗按 `/api/admin/user/options` 选用户，调 `grant`/`revoke`
