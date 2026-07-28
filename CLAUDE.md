@@ -90,7 +90,7 @@ MailCatcher 已从「纯接码工具」演进为「**多租户账号管理 + 统
 - **账号来源(source)**:
   - `self` — 自管邮箱，本地 IMAP/mailcom 取码（密码 AES-GCM 加密存）；可设 `fetch_address`(实际收件邮箱)与展示 `address` 分离——如 Codex 用 Outlook 订阅(展示)、验证码转发到公司 mail.com(收件)，取码时按转发邮件正文里的 `To:<原 Outlook>` 过滤区分
   - `forward` — 171mail 账号，转发到 `b.171mail.com/api/v1/message`（上游 token 加密存）
-- **IMAP 批量巡检**: 登录用户可在页面巡检有权查看的指定或全部账号（页面最多 200 个）；前端保持最多 5 个逐账号请求并实时显示已检查/剩余数量，同步 API 每次显式接收 1–5 个 ID。任务通过 BullMQ 跨实例限制全局并发，并有同账号冷却和单用户额度；后端验证 IMAP 登录与 `INBOX` 访问，统计正常/异常/跳过，错误脱敏且不自动修改健康状态。非 IMAP 收件路径标记为跳过
+- **IMAP 批量巡检**: 登录用户可在页面巡检有权查看的指定或全部账号（单批最多 200 个）；前端一次提交异步批次并轮询已检查/剩余数量。任务通过 BullMQ 跨实例限制全局并发和启动速率，并有积压保护、同账号冷却和单用户额度；后端验证 IMAP 登录与 `INBOX` 访问，统计正常/异常/跳过，错误脱敏且不自动修改健康状态。非 IMAP 收件路径标记为跳过
 - **App Key（外部系统接入）**: 管理员可创建 App Key（`ak_xxx` + `sk_xxx`），外部系统通过 `Authorization: Bearer ak:sk` 调用 API 接码。每个 App Key 可配账号范围、状态(active/disabled)，支持轮换。`app_keys` 表存 hash，明文仅创建/轮换时返回一次
 - **统一接码**: `GET /api/v1/message?token=&type=` 同步取码（兼容）；`POST /api/v1/message/async` 异步取码返回 `taskId`，`GET /api/v1/message/task/:taskId` 轮询结果。所有取码通过 BullMQ + Redis 队列处理，支持高并发和 worker 水平扩展
 - **状态系统**: 健康轴 `health_status`(active/error/banned/expired/disabled) + 归属/分配轴(`created_by` + `account_grants`)，
@@ -152,5 +152,5 @@ mailcatcher log list / clear            # 日志管理
 - **自助注册**：`POST /api/admin/register`（公开），邮箱须 `@apexin.ai` 后缀 + 密码二次确认（≥6 位）；注册即 `member`，登录后由管理员在用户管理升级为 admin。邮箱登录大小写不敏感
 - **前端导航按角色显隐**：member 只见「在线接码 + 账号管理」（登录落地账号管理）；admin 另见控制台/用户管理/App Key/服务配置/查询日志/个人。账号页：任何人都能加账号/导入/删自己的；每行按 `can_manage` 显示编辑/状态/分配/删除按钮；「分配」弹窗按 `/api/admin/user/options` 选用户，调 `grant`/`revoke`
 - **Codex 登录触发**：`POST /api/v1/codex/send`（需登录）用无头浏览器在 chatgpt.com 提交邮箱 → OpenAI 给该邮箱发「临时登录代码」（纯邮箱 OTP、无需密码、实测未遇验证码拦截）；再配合 self+`fetch_address` 转发收件箱把码取回。前端「在线接码」邮箱模式有「发送 Codex 登录码并自动取码」一键按钮。⚠ 依赖 OpenAI 登录页结构，可能随其改版/加强风控而失效
-- **IMAP 巡检运行边界**：页面最多加载 200 个可见账号并拆成单账号请求；同步接口每次必须显式传 1–5 个 ID。巡检任务进入 BullMQ，`setGlobalConcurrency` 在所有应用实例间限制总连接数；队列 deduplication 为同账号提供冷却，Redis 原子计数限制单用户频率。巡检不修改账号健康状态
+- **IMAP 巡检运行边界**：页面最多加载 200 个可见账号，并通过异步接口一次提交最多 200 个显式 ID，随后按 `batchId` 轮询进度。巡检任务进入 BullMQ，`setGlobalConcurrency` 在所有应用实例间限制总连接数；全局启动速率和积压上限保护上游，同账号任务去重并短期复用脱敏结果，Redis 原子计数限制单用户频率。巡检不修改账号健康状态
 - **可配置**：`MAILCATCHER_DATA_DIR`（DB 目录）、`FORWARD_171_BASE`（171mail 地址，测试用）、`REGISTER_EMAIL_SUFFIX`（注册邮箱后缀，默认 `@apexin.ai`）、`DB_BACKEND`（`sqlite` 或 `postgres`）、`DATABASE_URL`（PostgreSQL 连接串）、`REDIS_URL`（Redis 地址，默认 `redis://127.0.0.1:6379`）、`FETCH_CONCURRENCY`（Worker 并发数，默认 20）、`FETCH_LOOKBACK_MINUTES`（取码回溯时间窗，默认 30）、`MAILCOM_SCAN_LIMIT`（mail.com 每次扫描邮件数，默认 15）、`CHROME_PATH`（网页邮箱 Chromium 路径，默认 `/usr/bin/google-chrome`）、`WEBMAIL_SCAN_LIMIT`（Gazeta/Onet 每次扫描邮件数，默认 15）、`ONET_ACCESS_MODE=webmail`（可选，强制 Onet 网页模式）、`IMAP_INSPECTION_GLOBAL_CONCURRENCY`（巡检跨实例全局并发，默认 5、最高 10）、`IMAP_INSPECTION_GLOBAL_RATE_LIMIT` / `IMAP_INSPECTION_GLOBAL_RATE_WINDOW_MS`（全局启动速率，默认 30/分钟）、`IMAP_INSPECTION_MAX_PENDING`（全局积压上限，默认 250）、`IMAP_INSPECTION_ACCOUNT_COOLDOWN_MS`（任务完成后结果冷却，默认 30000）、`IMAP_INSPECTION_USER_LIMIT` / `IMAP_INSPECTION_USER_WINDOW_MS`（每用户默认 10 分钟 200 次）、`IMAP_INSPECTION_TIMEOUT_MS`（单账号连接超时，默认 20000）、`IMAP_INSPECTION_BATCH_TTL_MS`（批次结果保留，默认 30 分钟）
