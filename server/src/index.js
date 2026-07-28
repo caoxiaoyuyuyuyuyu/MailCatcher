@@ -16,6 +16,7 @@ import userRoutes from './routes/users.js';
 import appKeyRoutes from './routes/appKeys.js';
 import { authMiddleware } from './middleware/auth.js';
 import { startWorker } from './services/queue.js';
+import { startImapInspectionWorker } from './services/imapInspectionQueue.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -57,6 +58,7 @@ async function start() {
   await initDb();
   await ensureDefaultAdmin();
   startWorker();
+  await startImapInspectionWorker();
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`MailCatcher server running at http://0.0.0.0:${PORT}`);
     console.log(`Admin: http://localhost:${PORT}/admin`);

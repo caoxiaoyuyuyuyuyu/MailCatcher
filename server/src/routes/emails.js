@@ -1,7 +1,13 @@
 import { Router } from 'express';
 import db, { hasLegacyTokenColumn } from '../db.js';
 import { authMiddleware, requireRole, isAdmin } from '../middleware/auth.js';
-import { testImapConnection } from '../services/imap.js';
+import {
+  createImapInspectionBatch,
+  consumeImapInspectionQuota,
+  getImapInspectionBatch,
+  ImapInspectionBusyError,
+  refundImapInspectionQuota,
+} from '../services/imapInspectionQueue.js';
 import { encrypt, generateApiToken, hashToken, maskToken } from '../services/crypto.js';
 
 const router = Router();
@@ -9,6 +15,7 @@ router.use(authMiddleware);
 
 const adminOnly = requireRole('admin');
 const HEALTH = ['active', 'error', 'banned', 'expired', 'disabled'];
+const MAX_IMAP_INSPECTION_ACCOUNTS = 200;
 
 let HAS_LEGACY_TOKEN = null;
 async function checkLegacyToken() {
@@ -120,8 +127,14 @@ router.put('/update', async (req, res) => {
   const newShared = shared === undefined ? acc.shared : (shared ? 1 : 0);
   const newPurchaser = purchaser === undefined ? acc.purchaser : (purchaser || '');
   const newInvoiced = invoiced === undefined ? acc.invoiced : (invoiced ? 1 : 0);
-  await db('emails').where('id', id).update({
-    address: address ?? acc.address,
+  const nextAddress = address ?? acc.address;
+  const imapConfigChanged = acc.source === 'self' && (
+    nextAddress !== acc.address
+    || String(newFetch || '') !== String(acc.fetch_address || '')
+    || Boolean(password)
+  );
+  const updates = {
+    address: nextAddress,
     appkey: appkey ?? acc.appkey,
     batch_no: batch_no ?? acc.batch_no,
     status: status ?? acc.status,
@@ -132,7 +145,11 @@ router.put('/update', async (req, res) => {
     purchaser: newPurchaser,
     invoiced: newInvoiced,
     updated_at: db.fn.now(),
-  });
+  };
+  if (imapConfigChanged) {
+    updates.imap_config_version = db.raw('COALESCE(imap_config_version, 1) + 1');
+  }
+  await db('emails').where('id', id).update(updates);
   if (!newShared) {
     const gs = await grantsOf(id);
     if (gs.length > 1) await db('account_grants').where('account_id', id).whereNot('user_id', gs[0].user_id).del();
@@ -256,14 +273,108 @@ router.post('/import', async (req, res) => {
   res.json({ code: 200, data: { imported: results.length, batch_no, tokens: results }, message: `成功导入 ${results.length} 个账号` });
 });
 
-router.post('/test-connection', async (req, res) => {
-  const { address, password } = req.body;
-  if (!address || !password) return res.json({ code: 400, message: '请提供邮箱地址和密码' });
+async function findInspectableAccounts(req, ids) {
+  let query = db('emails as e')
+    .select(
+      'e.id', 'e.address', 'e.fetch_address', 'e.source', 'e.password_enc',
+      'e.created_by', 'e.imap_config_version',
+    )
+    .orderBy('e.id');
+
+  if (!isAdmin(req)) {
+    const granted = db('account_grants')
+      .where('user_id', req.user.id)
+      .whereRaw('account_id = e.id')
+      .select(db.raw('1'));
+    query = query.where(function () {
+      this.where('e.created_by', req.user.id).orWhereExists(granted);
+    });
+  }
+  return query.whereIn('e.id', ids).limit(MAX_IMAP_INSPECTION_ACCOUNTS);
+}
+
+async function submitImapInspection(req, res, requestedIds, maxAccounts = MAX_IMAP_INSPECTION_ACCOUNTS) {
+  if (!Array.isArray(requestedIds) || requestedIds.length === 0) {
+    return res.status(400).json({ code: 400, message: '请提供需要巡检的账号 ids' });
+  }
+  const ids = [...new Set(requestedIds.map(Number))];
+  if (ids.some(id => !Number.isInteger(id) || id <= 0)) {
+    return res.status(400).json({ code: 400, message: '账号 ID 不合法' });
+  }
+  if (ids.length > maxAccounts) {
+    return res.status(400).json({
+      code: 400,
+      message: `一次最多巡检 ${maxAccounts} 个账号`,
+    });
+  }
+
+  let quotaConsumed = 0;
   try {
-    const result = await testImapConnection(address, password);
-    res.json({ code: 200, data: result, message: 'IMAP 连接成功' });
-  } catch (err) {
-    res.json({ code: 500, message: err.message });
+    const accounts = await findInspectableAccounts(req, ids);
+    if (accounts.length) {
+      const quota = await consumeImapInspectionQuota(req.user.id, accounts.length);
+      if (!quota.allowed) {
+        return res.status(429).json({
+          code: 429,
+          data: { retry_after_ms: quota.retryAfterMs },
+          message: `巡检操作过于频繁，请约 ${Math.max(1, Math.ceil(quota.retryAfterMs / 1000))} 秒后重试`,
+        });
+      }
+      quotaConsumed = accounts.length;
+    }
+
+    const report = await createImapInspectionBatch(accounts, {
+      userId: req.user.id,
+      userRole: req.user.role,
+    });
+    return res.status(202).json({
+      code: 202,
+      data: report,
+      message: accounts.length ? '巡检任务已提交' : '没有可巡检的账号',
+    });
+  } catch (error) {
+    if (quotaConsumed) await refundImapInspectionQuota(req.user.id, quotaConsumed);
+    if (error instanceof ImapInspectionBusyError) {
+      return res.status(429).json({
+        code: 429,
+        data: { retry_after_ms: error.retryAfterMs },
+        message: error.message,
+      });
+    }
+    return res.status(500).json({ code: 500, message: `批量巡检提交失败: ${error.message}` });
+  }
+}
+
+router.post('/test-connection', async (req, res) => {
+  const id = Number(req.body?.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({
+      code: 400,
+      message: '连接测试只支持已保存账号，请提供账号 id',
+    });
+  }
+  return submitImapInspection(req, res, [id], 1);
+});
+
+router.post('/inspect-imap', async (req, res) => {
+  return submitImapInspection(req, res, req.body?.ids);
+});
+
+router.get('/inspect-imap/batch/:batchId', async (req, res) => {
+  try {
+    const batch = await getImapInspectionBatch(req.params.batchId, {
+      userId: req.user.id,
+      userRole: req.user.role,
+    });
+    if (!batch.found) {
+      return res.status(404).json({ code: 404, message: '巡检批次不存在或已过期' });
+    }
+    if (batch.forbidden) {
+      return res.status(403).json({ code: 403, message: '无权查看该巡检批次' });
+    }
+    return res.json({ code: 200, data: batch.report, message: 'success' });
+  } catch (error) {
+    return res.status(500).json({ code: 500, message: `查询巡检进度失败: ${error.message}` });
   }
 });
 

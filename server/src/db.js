@@ -88,6 +88,7 @@ async function ensureSchema() {
       t.integer('status').defaultTo(1);
       t.string('batch_no').defaultTo('');
       t.text('fetch_address').defaultTo('');
+      t.integer('imap_config_version').notNullable().defaultTo(1);
       t.integer('created_by');
       t.integer('shared').defaultTo(0);
       t.string('purchaser').defaultTo('');
@@ -174,6 +175,7 @@ async function ensureSchema() {
     ['assignee_id', t => t.integer('assignee_id')],
     ['password_enc', t => t.text('password_enc').defaultTo('')],
     ['fetch_address', t => t.text('fetch_address').defaultTo('')],
+    ['imap_config_version', t => t.integer('imap_config_version').notNullable().defaultTo(1)],
     ['forward_provider', t => t.string('forward_provider').defaultTo('')],
     ['forward_token_enc', t => t.text('forward_token_enc').defaultTo('')],
     ['token_hash', t => t.text('token_hash')],

@@ -6,9 +6,10 @@ import { fetchVia171 } from '../services/forward171.js';
 import { decrypt, maskToken } from './crypto.js';
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+const FETCH_QUEUE_NAME = process.env.FETCH_QUEUE_NAME || 'fetch-code';
 const connection = new IORedis(REDIS_URL, { maxRetriesPerRequest: null });
 
-export const fetchQueue = new Queue('fetch-code', { connection });
+export const fetchQueue = new Queue(FETCH_QUEUE_NAME, { connection });
 
 const FAIL_THRESHOLD = 3;
 
@@ -85,7 +86,7 @@ let worker = null;
 
 export function startWorker() {
   if (worker) return worker;
-  worker = new Worker('fetch-code', processFetchJob, {
+  worker = new Worker(FETCH_QUEUE_NAME, processFetchJob, {
     connection: new IORedis(REDIS_URL, { maxRetriesPerRequest: null }),
     concurrency: Number(process.env.FETCH_CONCURRENCY || 20),
   });
